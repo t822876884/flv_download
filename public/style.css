@@ -1,0 +1,218 @@
+* { box-sizing: border-box; }
+:root {
+  --bg: #f6f7fb;
+  --panel-bg: #ffffff;
+  --text: #1b1f29;
+  --text-muted: #5b6476;
+  --border: #e5e7ee;
+  --accent: #356dff;
+  --accent-hover: #2558e6;
+  --danger: #e04848;
+  --danger-hover: #c93737;
+  --success: #14b67a;
+  --shadow-sm: 0 6px 18px rgba(23, 27, 41, 0.06);
+  --shadow-md: 0 10px 24px rgba(23, 27, 41, 0.08);
+  --radius-lg: 16px;
+  --radius-md: 12px;
+  --radius-sm: 10px;
+  --transition: 200ms ease;
+}
+
+/* 基础与容器 */
+html, body { height: 100%; }
+body {
+  font: 14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,"Noto Sans",sans-serif;
+  color: var(--text);
+  background: radial-gradient(1200px 600px at 10% -10%, #eaf0ff 0%, rgba(234,240,255,0) 35%), var(--bg);
+  margin: 0;
+}
+.container {
+  max-width: 1200px;
+  padding: 28px 24px 40px;
+  margin: 0 auto;
+}
+
+/* 品牌区 */
+.brand {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 16px;
+  padding: 12px 16px;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, #ffffff, #fbfcff);
+  box-shadow: var(--shadow-sm);
+  border: 1px solid var(--border);
+}
+.brand-title {
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: .2px;
+}
+.brand-sub {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* 顶部表单 */
+.top {
+  margin-bottom: 18px;
+  padding: 14px;
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+#downloadForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+#downloadForm input[type="text"],
+#downloadForm input[type="url"] {
+  flex: 1 1 380px;
+  max-width: 520px;
+  min-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fbfbfe;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+#downloadForm input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(53, 109, 255, 0.16);
+}
+#downloadForm button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  box-shadow: 0 8px 20px rgba(53, 109, 255, 0.24);
+}
+#downloadForm button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+#downloadForm button:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(53, 109, 255, 0.2); }
+
+/* 列表双栏面板 */
+.lists {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.panel {
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 14px;
+  min-height: 320px;
+}
+.panel h2 {
+  margin: 0 0 12px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* 列表项卡条 */
+ul { list-style: none; padding: 0; margin: 0; }
+.row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 10px;
+  background: linear-gradient(180deg, #fff, #fbfbfe);
+  box-shadow: var(--shadow-sm);
+  transition: transform var(--transition), box-shadow var(--transition), border-color var(--transition);
+}
+.row:hover { transform: translateY(-2px); box-shadow: var(--shadow-md); border-color: #dbe0ea; }
+.title { font-weight: 600; color: var(--text); }
+.meta { font-size: 12px; color: var(--text-muted); }
+
+/* 操作按钮组 */
+.ops { display: inline-flex; gap: 8px; }
+.ops button {
+  padding: 7px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #ffffff;
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition), box-shadow var(--transition), transform var(--transition), border-color var(--transition);
+}
+.ops button:hover { background: #f3f6ff; border-color: #dbe2ff; transform: translateY(-1px); }
+.ops button:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(53,109,255,.22); }
+.ops button[disabled] { opacity: .55; cursor: not-allowed; transform: none; }
+
+/* 语义按钮色 */
+.ops button[data-op="play"],
+.ops button[data-op="play-completed"] {
+  color: #fff; background: var(--accent); border-color: transparent; box-shadow: 0 8px 18px rgba(53,109,255,.25);
+}
+.ops button[data-op="play"]:hover,
+.ops button[data-op="play-completed"]:hover { background: var(--accent-hover); }
+
+.ops button[data-op="cancel"],
+.ops button[data-op="delete"] {
+  color: #fff; background: var(--danger); border-color: transparent; box-shadow: 0 8px 18px rgba(224,72,72,.25);
+}
+.ops button[data-op="cancel"]:hover,
+.ops button[data-op="delete"]:hover { background: var(--danger-hover); }
+
+/* 分页 */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 6px;
+}
+.pager button {
+  padding: 7px 12px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition), transform var(--transition), border-color var(--transition);
+}
+.pager button:hover { background: #f5f7ff; transform: translateY(-1px); border-color: #dbe0ea; }
+.pager button:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+.pager span { font-size: 12px; color: var(--text-muted); }
+
+/* 响应式 */
+@media (max-width: 960px) {
+  .lists { grid-template-columns: 1fr; }
+  #downloadForm { gap: 8px; }
+}
+/* 可选暗色偏好（系统深色时） */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f121a;
+    --panel-bg: #151a23;
+    --text: #e5e9f2;
+    --text-muted: #a3adc2;
+    --border: #263042;
+    --accent: #4c8dff;
+    --accent-hover: #3775e6;
+    --danger: #ff5d5d;
+    --danger-hover: #eb4444;
+    --shadow-sm: 0 6px 18px rgba(0,0,0,.35);
+    --shadow-md: 0 12px 28px rgba(0,0,0,.45);
+  }
+  #downloadForm input { background: #0f1320; border-color: #2a3345; }
+  .row { background: linear-gradient(180deg, #151a23, #131822); }
+  .ops button { background: #121720; border-color: #283248; }
+  .pager button { background: #121720; border-color: #283248; }
+}

@@ -1,0 +1,14 @@
+version: "3.8"
+services:
+  flv-download:
+    build: .
+    container_name: flv-download
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - DATA_DIR=/data/videos
+      - DB_PATH=/data/tasks.sqlite3
+    volumes:
+      - /volume1/docker/flv-download:/data
+    restart: unless-stopped

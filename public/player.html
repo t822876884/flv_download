@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <title>FLV 播放器</title>
+  <style>
+    body { margin:0; background:#111; color:#ddd; display:flex; align-items:center; justify-content:center; height:100vh; }
+    video { width:90vw; height:80vh; background:#000; }
+  </style>
+</head>
+<body>
+  <video id="video" controls></video>
+
+  <script src="https://cdn.jsdelivr.net/npm/flv.js@latest/dist/flv.min.js"></script>
+  <script>
+    function getQuery() {
+      const q = new URLSearchParams(location.search);
+      return { id: q.get('id'), url: q.get('url') };
+    }
+    const { id, url } = getQuery();
+
+    function setup(src) {
+      if (flvjs.isSupported()) {
+        const player = flvjs.createPlayer({ type: 'flv', url: src });
+        player.attachMediaElement(document.getElementById('video'));
+        player.load();
+        player.play();
+      } else {
+        document.body.innerHTML = '<p>当前浏览器不支持 flv.js</p>';
+      }
+    }
+
+    if (id) {
+      setup(`/play/${encodeURIComponent(id)}`);
+    } else if (url) {
+      setup(`/proxy?url=${encodeURIComponent(url)}`);
+    } else {
+      document.body.innerHTML = '<p>缺少播放参数</p>';
+    }
+  </script>
+</body>
+</html>
