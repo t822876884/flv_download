@@ -47,8 +47,17 @@ app.post('/download', async (req, res) => {
     const rawTitle = req.body?.title;
     const title = sanitizeName(rawTitle);
 
-    if (!url || !title) {
-      return res.status(400).json({ ok: false, message: '缺少必填参数：url 或 title' });
+    // URL 与标题校验（无效输入直接 400）
+    const isHttpUrl = (u) => {
+      try {
+        const p = new URL(u);
+        return p.protocol === 'http:' || p.protocol === 'https:';
+      } catch (_) {
+        return false;
+      }
+    };
+    if (!url || !title || !isHttpUrl(url)) {
+      return res.status(400).json({ ok: false, message: '缺少必填参数或 URL 非 http/https' });
     }
 
     if (activeDownloads.has(title)) {
@@ -59,7 +68,6 @@ app.post('/download', async (req, res) => {
       });
     }
 
-    // 使用可配置的 BASE_DIR
     const folderPath = path.resolve(BASE_DIR, title);
     fs.mkdirSync(folderPath, { recursive: true });
 
@@ -93,23 +101,7 @@ app.post('/download', async (req, res) => {
       controller,
     });
 
-    const response = await axios.get(url, {
-      responseType: 'stream',
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      timeout: 1000 * 60 * 5,
-      signal: controller.signal,
-      validateStatus: (status) => status >= 200 && status < 400,
-    });
-
-    response.data.pipe(writer);
-
-    writer.on('finish', () => {
-      activeDownloads.delete(title);
-      db.setStatus(id, 'completed');
-      db.setFilePath(id, filePath);
-    });
-
+    // 后台异步执行下载，不阻塞接口响应
     const cleanupOnError = (err) => {
       activeDownloads.delete(title);
       try {
@@ -119,9 +111,30 @@ app.post('/download', async (req, res) => {
       console.error(`下载失败: ${title}`, err?.message || err);
     };
 
-    writer.on('error', cleanupOnError);
-    response.data.on('error', cleanupOnError);
+    axios
+      .get(url, {
+        responseType: 'stream',
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 1000 * 60 * 5,
+        signal: controller.signal,
+        validateStatus: (status) => status >= 200 && status < 400,
+      })
+      .then((response) => {
+        response.data.pipe(writer);
 
+        writer.on('finish', () => {
+          activeDownloads.delete(title);
+          db.setStatus(id, 'completed');
+          db.setFilePath(id, filePath);
+        });
+
+        writer.on('error', cleanupOnError);
+        response.data.on('error', cleanupOnError);
+      })
+      .catch(cleanupOnError);
+
+    // 立即返回，避免前端看到 500
     return res.status(202).json({
       ok: true,
       message: '下载任务已启动',
@@ -200,25 +213,40 @@ app.get('/proxy', async (req, res) => {
 
 // 新增：取消下载（按 title 取消），并清理已下载的部分文件
 app.post('/cancel', (req, res) => {
-  const title = sanitizeName(req.body?.title);
-  if (!title) return res.status(400).json({ ok: false, message: '缺少 title' });
+  // 支持按 id 或 title 取消，优先 id（更精确）
+  const id = req.body?.id ? String(req.body.id).trim() : '';
+  const rawTitle = req.body?.title;
+  const titleInBody = rawTitle ? sanitizeName(rawTitle) : '';
+
+  let title = titleInBody;
+
+  if (id) {
+    const t = db.getById(id);
+    if (!t) {
+      return res.status(404).json({ ok: false, message: '未找到该任务 id' });
+    }
+    if (t.status !== 'downloading') {
+      return res.status(400).json({ ok: false, message: '仅可取消 status=downloading 的任务' });
+    }
+    title = sanitizeName(t.title);
+  }
+
+  if (!title) return res.status(400).json({ ok: false, message: '缺少 id 或 title' });
+
   const task = activeDownloads.get(title);
   if (!task) return res.status(404).json({ ok: false, message: '未找到进行中的同名任务' });
 
   try {
     task.controller.abort();
-    try {
-      task.writer.destroy();
-    } catch (_) {}
-    try {
-      if (fs.existsSync(task.filePath)) fs.unlinkSync(task.filePath);
-    } catch (_) {}
+    try { task.writer.destroy(); } catch (_) {}
+    try { if (fs.existsSync(task.filePath)) fs.unlinkSync(task.filePath); } catch (_) {}
+
     activeDownloads.delete(title);
     db.setStatus(task.id, 'cancelled');
 
-    res.json({ ok: true, message: '已取消下载并删除临时文件', taskId: task.id });
+    return res.json({ ok: true, message: '已取消下载并删除临时文件', taskId: task.id });
   } catch (err) {
-    res.status(500).json({ ok: false, message: '取消失败', error: err?.message || String(err) });
+    return res.status(500).json({ ok: false, message: '取消失败', error: err?.message || String(err) });
   }
 });
 
@@ -241,6 +269,25 @@ app.post('/delete', (req, res) => {
     res.json({ ok: true, message: '已删除文件', id });
   } catch (err) {
     res.status(500).json({ ok: false, message: '删除失败', error: err?.message || String(err) });
+  }
+});
+
+// 新增：任务列表查询（支持 status=downloading | completed）
+app.get('/tasks', (req, res) => {
+  try {
+    const status = String(req.query.status || '').trim();
+    const page = parseInt(req.query.page || '1', 10);
+    const pageSize = parseInt(req.query.pageSize || '10', 10);
+
+    const allowed = ['downloading', 'completed'];
+    if (!allowed.includes(status)) {
+      return res.status(400).json({ ok: false, message: 'status must be downloading or completed' });
+    }
+
+    const result = db.listByStatus(status, page, pageSize);
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: 'query failed', error: err?.message || String(err) });
   }
 });
 

@@ -1,7 +1,10 @@
+// 顶部：增加轮询控制
 const state = {
   downloading: { page: 1, pageSize: 5, total: 0 },
   completed: { page: 1, pageSize: 5, total: 0 },
 };
+let downloadingPollTimer = null;
+const POLL_MS = 3000;
 
 function fmtTime(iso) {
   if (!iso) return '';
@@ -31,7 +34,7 @@ function renderList(status, items) {
       <div class="ops">
         ${status === 'downloading'
           ? `<button data-op="play" data-url="${encodeURIComponent(t.url)}">播放</button>
-             <button data-op="cancel" data-title="${t.title}">取消</button>`
+             <button data-op="cancel" data-id="${t.id}" data-title="${t.title}">取消</button>`
           : `<button data-op="play-completed" data-id="${t.id}">播放</button>
              <button data-op="delete" data-id="${t.id}">删除</button>`}
       </div>
@@ -39,7 +42,8 @@ function renderList(status, items) {
     listEl.appendChild(li);
   });
 
-  listEl.addEventListener('click', async (e) => {
+  // 稳定事件委托（避免 { once: true } 导致后续点击失效）
+  listEl.onclick = async (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
 
@@ -47,26 +51,37 @@ function renderList(status, items) {
       const url = decodeURIComponent(btn.dataset.url);
       window.open(`/player.html?url=${encodeURIComponent(url)}`, '_blank');
     } else if (btn.dataset.op === 'cancel') {
+      const id = btn.dataset.id;
       const title = btn.dataset.title;
-      await fetch('/cancel', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      await refresh('downloading');
+      btn.disabled = true;
+      try {
+        await fetch('/cancel', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(id ? { id } : { title }),
+        });
+        await refresh('downloading'); // 取消后立即刷新下载中列表
+      } finally {
+        btn.disabled = false;
+      }
     } else if (btn.dataset.op === 'play-completed') {
       const id = btn.dataset.id;
       window.open(`/player.html?id=${encodeURIComponent(id)}`, '_blank');
     } else if (btn.dataset.op === 'delete') {
       const id = btn.dataset.id;
-      await fetch('/delete', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id }),
-      });
-      await refresh('completed');
+      btn.disabled = true;
+      try {
+        await fetch('/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id }),
+        });
+        await refresh('completed');
+      } finally {
+        btn.disabled = false;
+      }
     }
-  }, { once: true });
+  };
 }
 
 function renderPager(status) {
@@ -102,6 +117,27 @@ async function refresh(status) {
   renderPager(status);
 }
 
+// 启动/暂停“下载中”列表的自动轮询（标签页不可见时暂停）
+function startDownloadingPoll() {
+  if (downloadingPollTimer) clearInterval(downloadingPollTimer);
+  const tick = () => refresh('downloading');
+
+  // 仅在页面可见时轮询
+  const setup = () => {
+    if (document.visibilityState === 'visible') {
+      tick(); // 切回可见时先立即刷新一次
+      downloadingPollTimer = setInterval(tick, POLL_MS);
+    } else {
+      if (downloadingPollTimer) clearInterval(downloadingPollTimer);
+      downloadingPollTimer = null;
+    }
+  };
+
+  document.removeEventListener('visibilitychange', setup);
+  document.addEventListener('visibilitychange', setup);
+  setup();
+}
+
 document.getElementById('downloadForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const title = document.getElementById('title').value.trim();
@@ -114,11 +150,22 @@ document.getElementById('downloadForm').addEventListener('submit', async (e) => 
     body: JSON.stringify({ title, url }),
   });
 
+  if (!res.ok) {
+    let msg = '下载任务提交失败';
+    try {
+      const data = await res.json();
+      if (data?.message) msg = data.message;
+    } catch (_) {}
+    alert(msg);
+    return;
+  }
+
   document.getElementById('url').value = '';
-  await refresh('downloading');
+  await refresh('downloading'); // 提交后立即刷新一次
 });
 
 (async function init() {
   await refresh('downloading');
   await refresh('completed');
+  startDownloadingPoll(); // 启动“下载中”列表轮询
 })();
