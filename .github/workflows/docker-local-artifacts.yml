@@ -2,7 +2,7 @@ name: Docker Local Artifacts
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ "master" ]
   workflow_dispatch:
 
 jobs:
@@ -30,17 +30,19 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (tar) - ${{ matrix.platform }}
+      - name: Build image (load) - ${{ matrix.platform }}
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: ${{ matrix.platform }}
-          push: false
+          load: true
           tags: flv-download:${{ matrix.tag_suffix }}
-          outputs: type=tar,dest=flv-download-${{ matrix.tag_suffix }}.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
+
+      - name: Save image as tar - ${{ matrix.tag_suffix }}
+        run: docker save flv-download:${{ matrix.tag_suffix }} -o flv-download-${{ matrix.tag_suffix }}.tar
 
       - name: Upload artifact - ${{ matrix.tag_suffix }}
         uses: actions/upload-artifact@v4
