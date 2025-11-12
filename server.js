@@ -29,6 +29,16 @@ function normalizeUrl(raw) {
   return u;
 }
 
+function toggleHttpScheme(u) {
+  try {
+    const p = new URL(u);
+    p.protocol = p.protocol === 'http:' ? 'https:' : (p.protocol === 'https:' ? 'http:' : p.protocol);
+    return p.href;
+  } catch (_) {
+    return u;
+  }
+}
+
 function timestampString(d = new Date()) {
   const pad = (n) => String(n).padStart(2, '0');
   const Y = d.getFullYear();
@@ -92,28 +102,41 @@ function startDownload(title, url) {
     console.error(`下载失败: ${title}`, err?.message || err);
   };
 
-  axios
-    .get(url, {
-      responseType: 'stream',
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity,
-      timeout: 1000 * 60 * 5,
-      signal: controller.signal,
-      validateStatus: (status) => status >= 200 && status < 400,
-    })
-    .then((response) => {
-      response.data.pipe(writer);
+  const tryGet = (u, attempt = 0) => {
+    return axios
+      .get(u, {
+        responseType: 'stream',
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        timeout: 1000 * 60 * 5,
+        signal: controller.signal,
+        validateStatus: (status) => status >= 200 && status < 400,
+      })
+      .then((response) => {
+        response.data.pipe(writer);
 
-      writer.on('finish', () => {
-        activeDownloads.delete(title);
-        db.setStatus(id, 'completed');
-        db.setFilePath(id, filePath);
+        writer.on('finish', () => {
+          activeDownloads.delete(title);
+          db.setStatus(id, 'completed');
+          db.setFilePath(id, filePath);
+        });
+
+        writer.on('error', cleanupOnError);
+        response.data.on('error', cleanupOnError);
+      })
+      .catch((err) => {
+        const msg = String(err?.message || '');
+        if (attempt === 0 && /protocol/i.test(msg)) {
+          try {
+            const alt = toggleHttpScheme(u);
+            return tryGet(alt, 1);
+          } catch (_) {}
+        }
+        cleanupOnError(err);
       });
+  };
 
-      writer.on('error', cleanupOnError);
-      response.data.on('error', cleanupOnError);
-    })
-    .catch(cleanupOnError);
+  tryGet(url);
 
   return { id, folderPath, filename, filePath };
 }
@@ -270,6 +293,20 @@ app.get('/proxy', async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     response.data.pipe(res);
   } catch (err) {
+    const msg = String(err?.message || '');
+    if (/protocol/i.test(msg)) {
+      try {
+        const alt = toggleHttpScheme(url);
+        const response = await axios.get(alt, {
+          responseType: 'stream',
+          timeout: 1000 * 60 * 5,
+          validateStatus: (s) => s >= 200 && s < 400,
+        });
+        res.setHeader('Content-Type', 'video/x-flv');
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        return response.data.pipe(res);
+      } catch (_) {}
+    }
     res.status(500).send(`代理失败: ${err?.message || err}`);
   }
 });
