@@ -144,28 +144,46 @@ document.getElementById('downloadForm').addEventListener('submit', async (e) => 
   const url = document.getElementById('url').value.trim();
   if (!title || !url) return;
 
-  await fetch('/download', {
+  const res = await fetch('/download', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ title, url }),
   });
-
   if (!res.ok) {
     let msg = '下载任务提交失败';
-    try {
-      const data = await res.json();
-      if (data?.message) msg = data.message;
-    } catch (_) {}
+    try { const data = await res.json(); if (data?.message) msg = data.message; } catch (_) {}
     alert(msg);
     return;
   }
 
   document.getElementById('url').value = '';
-  await refresh('downloading'); // 提交后立即刷新一次
+  await refresh('downloading');
+});
+
+// 新增：解析文本下载，不影响原表单
+document.getElementById('parseForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const text = document.getElementById('parseText').value.trim();
+  if (!text) return;
+
+  const res = await fetch('/download/parse', {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain' },
+    body: text,
+  });
+  if (!res.ok) {
+    let msg = '解析或下载启动失败';
+    try { const data = await res.json(); if (data?.message) msg = data.message; } catch (_) {}
+    alert(msg);
+    return;
+  }
+
+  document.getElementById('parseText').value = '';
+  await refresh('downloading');
 });
 
 (async function init() {
   await refresh('downloading');
   await refresh('completed');
-  startDownloadingPoll(); // 启动“下载中”列表轮询
+  startDownloadingPoll();
 })();

@@ -17,6 +17,11 @@
         <input type="url" id="url" placeholder="视频地址（http://...flv）" required />
         <button type="submit">提交下载</button>
       </form>
+      <!-- 新增：文本解析下载，不影响原表单 -->
+      <form id="parseForm" style="margin-top:12px;">
+        <textarea id="parseText" rows="3" placeholder="粘贴文本（如：柒萌KK ffmpeg -i `http://...flv` -q 0 -f flv ./柒萌KK20250101123000.flv）" required></textarea>
+        <button type="submit">解析并下载</button>
+      </form>
     </div>
 
     <div class="lists">

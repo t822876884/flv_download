@@ -40,6 +40,84 @@ function timestampString(d = new Date()) {
   return `${Y}${M}${D}${h}${m}${s}`;
 }
 
+// 新增：通用校验与启动函数
+function isHttpUrl(u) {
+  try {
+    const p = new URL(u);
+    return p.protocol === 'http:' || p.protocol === 'https:';
+  } catch (_) {
+    return false;
+  }
+}
+
+function startDownload(title, url) {
+  const folderPath = path.resolve(BASE_DIR, title);
+  fs.mkdirSync(folderPath, { recursive: true });
+
+  const id = `${title}${timestampString()}`;
+  const filename = `${title}${timestampString()}.flv`;
+  const filePath = path.join(folderPath, filename);
+
+  db.insert({
+    id,
+    title,
+    url,
+    save_dir: folderPath,
+    file_path: filePath,
+    status: 'downloading',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  });
+
+  const writer = fs.createWriteStream(filePath);
+  const controller = new AbortController();
+
+  activeDownloads.set(title, {
+    id,
+    title,
+    url,
+    folderPath,
+    filePath,
+    startedAt: new Date().toISOString(),
+    writer,
+    controller,
+  });
+
+  const cleanupOnError = (err) => {
+    activeDownloads.delete(title);
+    try {
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+    } catch (_) {}
+    db.setStatus(id, 'error');
+    console.error(`下载失败: ${title}`, err?.message || err);
+  };
+
+  axios
+    .get(url, {
+      responseType: 'stream',
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      timeout: 1000 * 60 * 5,
+      signal: controller.signal,
+      validateStatus: (status) => status >= 200 && status < 400,
+    })
+    .then((response) => {
+      response.data.pipe(writer);
+
+      writer.on('finish', () => {
+        activeDownloads.delete(title);
+        db.setStatus(id, 'completed');
+        db.setFilePath(id, filePath);
+      });
+
+      writer.on('error', cleanupOnError);
+      response.data.on('error', cleanupOnError);
+    })
+    .catch(cleanupOnError);
+
+  return { id, folderPath, filename, filePath };
+}
+
 // 修改下载接口：写入 SQLite，记录唯一 id 与状态
 app.post('/download', async (req, res) => {
   try {
@@ -47,15 +125,6 @@ app.post('/download', async (req, res) => {
     const rawTitle = req.body?.title;
     const title = sanitizeName(rawTitle);
 
-    // URL 与标题校验（无效输入直接 400）
-    const isHttpUrl = (u) => {
-      try {
-        const p = new URL(u);
-        return p.protocol === 'http:' || p.protocol === 'https:';
-      } catch (_) {
-        return false;
-      }
-    };
     if (!url || !title || !isHttpUrl(url)) {
       return res.status(400).json({ ok: false, message: '缺少必填参数或 URL 非 http/https' });
     }
@@ -68,77 +137,11 @@ app.post('/download', async (req, res) => {
       });
     }
 
-    const folderPath = path.resolve(BASE_DIR, title);
-    fs.mkdirSync(folderPath, { recursive: true });
-
-    const id = `${title}${timestampString()}`;
-    const filename = `${title}${timestampString()}.flv`;
-    const filePath = path.join(folderPath, filename);
-
-    // 预写入任务到 DB
-    db.insert({
-      id,
-      title,
-      url,
-      save_dir: folderPath,
-      file_path: filePath,
-      status: 'downloading',
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
-
-    const writer = fs.createWriteStream(filePath);
-    const controller = new AbortController();
-
-    activeDownloads.set(title, {
-      id,
-      title,
-      url,
-      folderPath,
-      filePath,
-      startedAt: new Date().toISOString(),
-      writer,
-      controller,
-    });
-
-    // 后台异步执行下载，不阻塞接口响应
-    const cleanupOnError = (err) => {
-      activeDownloads.delete(title);
-      try {
-        if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      } catch (_) {}
-      db.setStatus(id, 'error');
-      console.error(`下载失败: ${title}`, err?.message || err);
-    };
-
-    axios
-      .get(url, {
-        responseType: 'stream',
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        timeout: 1000 * 60 * 5,
-        signal: controller.signal,
-        validateStatus: (status) => status >= 200 && status < 400,
-      })
-      .then((response) => {
-        response.data.pipe(writer);
-
-        writer.on('finish', () => {
-          activeDownloads.delete(title);
-          db.setStatus(id, 'completed');
-          db.setFilePath(id, filePath);
-        });
-
-        writer.on('error', cleanupOnError);
-        response.data.on('error', cleanupOnError);
-      })
-      .catch(cleanupOnError);
-
-    // 立即返回，避免前端看到 500
+    const task = startDownload(title, url);
     return res.status(202).json({
       ok: true,
       message: '下载任务已启动',
-      task: { id, title, url, folderPath, filename, filePath },
+      task: { id: task.id, title, url, folderPath: task.folderPath, filename: task.filename, filePath: task.filePath },
     });
   } catch (err) {
     return res.status(500).json({
@@ -146,6 +149,66 @@ app.post('/download', async (req, res) => {
       message: '下载任务启动失败',
       error: err?.message || String(err),
     });
+  }
+});
+
+// 新增：解析 ffmpeg 风格文本并发起下载（独立入口）
+app.post('/download/parse', express.text({ type: ['text/plain', 'text/*', 'application/octet-stream'] }), (req, res) => {
+  try {
+    const input = typeof req.body === 'string' && req.body.trim()
+      ? req.body
+      : (req.body && req.body.text) || '';
+
+    if (!input || typeof input !== 'string') {
+      return res.status(400).json({ ok: false, message: '缺少文本内容' });
+    }
+
+    // 提取 URL
+    const urlMatch = input.match(/https?:\/\/[^\s'"`]+/i);
+    const rawUrl = urlMatch ? urlMatch[0] : '';
+    const url = normalizeUrl(rawUrl);
+
+    // 提取标题：优先 ffmpeg 之前的前缀；其次输出文件名中的标题；最后从 URL 推断
+    let titleCandidate = '';
+    const beforeFfmpeg = input.split(/ffmpeg/i)[0].trim();
+    if (beforeFfmpeg) {
+      titleCandidate = beforeFfmpeg;
+    } else {
+      const outMatch = input.match(/\.\/([^\/\\\s]+?)(\d{8,})\.flv/i);
+      if (outMatch && outMatch[1]) {
+        titleCandidate = outMatch[1];
+      }
+    }
+    if (!titleCandidate && url) {
+      try {
+        const u = new URL(url);
+        const base = (u.pathname.split('/').pop() || '').replace(/\.flv$/i, '');
+        // 去掉末尾纯数字时间戳
+        titleCandidate = base.replace(/\d{8,}$/, '') || base;
+      } catch (_) {}
+    }
+    let title = sanitizeName(titleCandidate) || '视频';
+
+    if (!url || !isHttpUrl(url) || !title) {
+      return res.status(400).json({ ok: false, message: '无法从文本中解析到有效的 URL/标题' });
+    }
+
+    if (activeDownloads.has(title)) {
+      return res.status(200).json({
+        ok: true,
+        message: '同名下载任务正在进行，已跳过',
+        task: { title, url },
+      });
+    }
+
+    const task = startDownload(title, url);
+    return res.status(202).json({
+      ok: true,
+      message: '解析成功并已启动下载',
+      task: { id: task.id, title, url, folderPath: task.folderPath, filename: task.filename, filePath: task.filePath },
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, message: '解析或启动失败', error: err?.message || String(err) });
   }
 });
 
