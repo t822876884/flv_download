@@ -98,6 +98,46 @@ body {
 #downloadForm button:hover { background: var(--accent-hover); transform: translateY(-1px); }
 #downloadForm button:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(53, 109, 255, 0.2); }
 
+/* 解析并下载：与上方表单风格一致 */
+#parseForm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  margin-top: 12px;
+}
+#parseForm textarea {
+  flex: 1 1 680px;
+  max-width: 760px;
+  min-width: 280px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: #fbfbfe;
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  /* 单行外观，仍可显示长文本 */
+  height: 40px;
+  resize: none;
+}
+#parseForm textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(53, 109, 255, 0.16);
+}
+#parseForm button {
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform var(--transition), box-shadow var(--transition), background var(--transition);
+  box-shadow: 0 8px 20px rgba(53, 109, 255, 0.24);
+}
+#parseForm button:hover { background: var(--accent-hover); transform: translateY(-1px); }
+#parseForm button:active { transform: translateY(0); box-shadow: 0 6px 16px rgba(53, 109, 255, 0.2); }
+
 /* 列表双栏面板 */
 .lists {
   display: grid;
@@ -195,6 +235,7 @@ ul { list-style: none; padding: 0; margin: 0; }
 @media (max-width: 960px) {
   .lists { grid-template-columns: 1fr; }
   #downloadForm { gap: 8px; }
+  #parseForm { gap: 8px; }
 }
 /* 可选暗色偏好（系统深色时） */
 @media (prefers-color-scheme: dark) {
@@ -212,6 +253,7 @@ ul { list-style: none; padding: 0; margin: 0; }
     --shadow-md: 0 12px 28px rgba(0,0,0,.45);
   }
   #downloadForm input { background: #0f1320; border-color: #2a3345; }
+  #parseForm textarea { background: #0f1320; border-color: #2a3345; }
   .row { background: linear-gradient(180deg, #151a23, #131822); }
   .ops button { background: #121720; border-color: #283248; }
   .pager button { background: #121720; border-color: #283248; }
