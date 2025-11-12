@@ -10,5 +10,5 @@ services:
       - DATA_DIR=/data/videos
       - DB_PATH=/data/tasks.sqlite3
     volumes:
-      - /volume1/docker/flv-download:/data
+      - ./data:/data
     restart: unless-stopped
