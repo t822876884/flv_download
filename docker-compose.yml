@@ -4,9 +4,9 @@ services:
     build: .
     container_name: flv-download
     ports:
-      - "3000:3000"
+      - "3180:3180"
     environment:
-      - PORT=3000
+      - PORT=3180
       - DATA_DIR=/data/videos
       - DB_PATH=/data/tasks.sqlite3
     volumes:

@@ -43,7 +43,7 @@
 
 ## 环境变量
 
-- `PORT`：服务端口（默认 `3000`）
+- `PORT`：服务端口（默认 `3180`）
 - `DATA_DIR`：视频根目录（默认工作目录 `process.cwd()`）
 - `DB_PATH`：SQLite 文件路径（默认 `process.cwd()/tasks.sqlite3`）
 
@@ -78,7 +78,7 @@
 
 ## 前端使用
 
-- 管理页面：`http://localhost:3000/`
+- 管理页面：`http://localhost:3180/`
   - 顶部表单提交下载
   - 左侧“下载中”：播放（走 `/proxy`）/取消
   - 右侧“已完成”：播放（走 `/play/:id`）/删除
@@ -113,13 +113,13 @@ node server.js
 5) 打开页面
 
 ```bash
-open http://localhost:3000
+open http://localhost:3180
 ```
 
 6) 发起下载示例
 
 ```bash
-curl -X POST http://localhost:3000/download \
+curl -X POST http://localhost:3180/download \
   -H "Content-Type: application/json" \
   -d '{"url":"http://01lawylahydi.wljzml.top/live/cx_375809.flv","title":"小花猫"}'
 ```
