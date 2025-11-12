@@ -17,13 +17,13 @@ RUN npm ci --omit=dev
 COPY . .
 
 # 容器默认的持久化位置（可用 compose 覆盖）
-ENV PORT=3000
+ENV PORT=3180
 ENV DATA_DIR=/data/videos
 ENV DB_PATH=/data/tasks.sqlite3
 
 # 声明可挂载数据卷
 VOLUME ["/data"]
 
-EXPOSE 3000
+EXPOSE 3180
 
 CMD ["node", "server.js"]

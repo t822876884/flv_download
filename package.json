@@ -4,7 +4,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node server.js",
-    "serve": "PORT=3000 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 node server.js",
+    "serve": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 node server.js",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down"
   },
@@ -15,7 +15,7 @@
   "dependencies": {
     "axios": "^1.13.2",
     "better-sqlite3": "^12.4.1",
-    "express": "^5.1.0",
-    "dotenv": "^16.4.5"
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0"
   }
 }
