@@ -32,9 +32,9 @@ function showView(name) {
 }
 
 function router() {
-  const h = location.hash || '#/downloads';
+  const h = location.hash || '#/home';
   setActiveMenu(h);
-  const name = h.replace('#/', '') || 'downloads';
+  const name = h.replace('#/', '') || 'home';
   showView(name);
 }
 
@@ -628,3 +628,12 @@ async function loadChannel(address, platformTitle) {
 }
 
 (function init() { router(); })();
+
+const logoutBtn = document.getElementById('logoutBtn');
+if (logoutBtn) {
+  logoutBtn.onclick = async (e) => {
+    e.preventDefault();
+    try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
+    location.href = '/login';
+  };
+}
