@@ -6,9 +6,49 @@ const fs = require('fs');
 const path = require('path');
 const db = require('./db');
 
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+});
+process.on('uncaughtExceptionMonitor', (err) => {
+  console.error('[uncaughtExceptionMonitor]', err && err.stack ? err.stack : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+});
+['SIGINT', 'SIGTERM'].forEach((sig) => {
+  process.on(sig, () => {
+    console.error('[signal]', sig);
+    process.exit(0);
+  });
+});
+process.on('exit', (code) => {
+  console.error('[exit]', code);
+});
+
+axios.interceptors.response.use(
+  (r) => r,
+  (e) => {
+    const m = e && e.config && e.config.method ? String(e.config.method).toUpperCase() : '-';
+    const u = e && e.config && e.config.url ? e.config.url : '-';
+    console.error('[axios]', m, u, e && e.stack ? e.stack : e);
+    return Promise.reject(e);
+  }
+);
+
 const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(process.cwd(), 'public')));
+
+app.use((req, res, next) => {
+  const start = Date.now();
+  const rid = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  req.rid = rid;
+  console.log('[request]', rid, req.method, req.originalUrl);
+  res.on('finish', () => {
+    console.log('[response]', rid, res.statusCode, (Date.now() - start) + 'ms');
+  });
+  next();
+});
 
 // 基础存储目录（可通过环境变量覆盖）
 const BASE_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : process.cwd();
@@ -99,7 +139,7 @@ function startDownload(title, url) {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch (_) {}
     db.setStatus(id, 'error');
-    console.error(`下载失败: ${title}`, err?.message || err);
+    console.error('[download-error]', id, title, err && err.stack ? err.stack : err);
   };
 
   const tryGet = (u, attempt = 0) => {
@@ -392,6 +432,11 @@ app.get('/tasks', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3180;
+app.use((err, req, res, next) => {
+  const rid = req && req.rid ? req.rid : '-';
+  console.error('[route-error]', rid, req.method, req.originalUrl, err && err.stack ? err.stack : err);
+  res.status(500).json({ ok: false, message: 'internal error' });
+});
 app.listen(PORT, () => {
   console.log(`Video server listening on http://localhost:${PORT}`);
 });
