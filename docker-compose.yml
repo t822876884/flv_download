@@ -12,3 +12,5 @@ services:
     volumes:
       - ./data:/data
     restart: unless-stopped
+    # 自动根据外部传入的 TARGET_PLATFORM 指定平台（可选）
+    platform: ${TARGET_PLATFORM}

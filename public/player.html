@@ -9,15 +9,23 @@
   </style>
 </head>
 <body>
-  <video id="video" controls></video>
+  <div style="position:fixed;left:16px;right:16px;top:16px;bottom:80px;display:flex;align-items:center;justify-content:center;">
+    <video id="video" controls></video>
+  </div>
+  <div style="position:fixed;left:0;right:0;bottom:0;padding:12px;display:flex;gap:12px;justify-content:center;background:#121212bd;backdrop-filter: blur(4px);">
+    <button id="btnFav">收藏</button>
+    <button id="btnBlk">屏蔽</button>
+    <button id="btnDl">下载</button>
+    <button id="btnCopy">复制地址</button>
+  </div>
 
   <script src="https://cdn.jsdelivr.net/npm/flv.js@latest/dist/flv.min.js"></script>
   <script>
     function getQuery() {
       const q = new URLSearchParams(location.search);
-      return { id: q.get('id'), url: q.get('url') };
+      return { id: q.get('id'), url: q.get('url'), platform: q.get('platform'), address: q.get('address'), title: q.get('title') };
     }
-    const { id, url } = getQuery();
+    const { id, url, platform, address, title } = getQuery();
 
     function setup(src) {
       if (flvjs.isSupported()) {
@@ -30,13 +38,46 @@
       }
     }
 
+    const isHttp = (u) => { try { const p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:'; } catch (_) { return false; } };
     if (id) {
       setup(`/play/${encodeURIComponent(id)}`);
-    } else if (url) {
+    } else if (url && isHttp(url)) {
       setup(`/proxy?url=${encodeURIComponent(url)}`);
+    } else if (address && isHttp(address)) {
+      setup(`/proxy?url=${encodeURIComponent(address)}`);
     } else {
-      document.body.innerHTML = '<p>缺少播放参数</p>';
+      document.getElementById('video').outerHTML = '<p>当前地址不可通过 flv.js 播放，仍可进行收藏/屏蔽/复制/下载（仅 http/https 可下载）。</p>';
     }
+
+    const btnFav = document.getElementById('btnFav');
+    const btnBlk = document.getElementById('btnBlk');
+    const btnDl = document.getElementById('btnDl');
+    const btnCopy = document.getElementById('btnCopy');
+
+    const canChannelOps = !!(platform && address);
+    if (!canChannelOps) { btnFav.disabled = true; btnBlk.disabled = true; }
+
+    btnFav.onclick = async () => {
+      if (!canChannelOps) return alert('缺少平台信息，无法收藏');
+      await fetch('/channel/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: platform, address, favorite: 1 }) });
+      alert('已收藏');
+    };
+    btnBlk.onclick = async () => {
+      if (!canChannelOps) return alert('缺少平台信息，无法屏蔽');
+      await fetch('/channel/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: platform, address, blocked: 1 }) });
+      alert('已屏蔽');
+    };
+    btnDl.onclick = async () => {
+      const src = url || address || '';
+      if (!isHttp(src)) return alert('仅支持 http/https 地址下载');
+      const t = title || '视频';
+      const r = await fetch('/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, url: src }) });
+      if (r.ok) alert('已提交下载'); else alert('下载提交失败');
+    };
+    btnCopy.onclick = async () => {
+      const src = url || address || '';
+      try { await navigator.clipboard.writeText(src); alert('已复制'); } catch (_) { alert('复制失败'); }
+    };
   </script>
 </body>
 </html>

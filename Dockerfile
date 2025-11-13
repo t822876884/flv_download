@@ -15,6 +15,8 @@ WORKDIR /app
 # 先复制依赖清单以利用缓存
 COPY package*.json ./
 RUN npm ci --omit=dev
+# 针对当前构建平台重编译原生模块，避免架构不匹配
+RUN npm rebuild better-sqlite3 --build-from-source
 
 # 复制应用代码
 COPY . .

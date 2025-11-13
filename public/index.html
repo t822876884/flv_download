@@ -6,45 +6,118 @@
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
-  <div class="container">
-    <header class="brand">
-      <div class="brand-title">FLV 下载管理</div>
-      <div class="brand-sub">管理下载任务 · 播放与清理更顺手</div>
-    </header>
-    <div class="top">
-      <form id="downloadForm">
-        <input type="text" id="title" placeholder="主播名（如：小花猫）" required />
-        <input type="url" id="url" placeholder="视频地址（http://...flv）" required />
-        <button type="submit">提交下载</button>
-      </form>
-      <!-- 解析并下载：移除内联样式，交由 CSS 控制 -->
-      <form id="parseForm">
-        <textarea id="parseText" rows="1" placeholder="粘贴文本（如：柒萌KK ffmpeg -i `http://...flv` -q 0 -f flv ./柒萌KK20250101123000.flv）" required></textarea>
-        <button type="submit">解析并下载</button>
-      </form>
-    </div>
+  <div class="layout">
+    <aside class="sider">
+      <a class="menu-item" href="#/home">首页</a>
+      <a class="menu-item" href="#/explore">探索</a>
+      <a class="menu-item" href="#/downloads">下载管理</a>
+      <a class="menu-item" href="#/settings">设置</a>
+    </aside>
+    <main class="content">
+      <div class="container">
+        <section id="homeView" style="display:none">
+          <div class="panel">
+            <h2>首页</h2>
+            <p>左侧菜单可进入探索、下载管理与设置。</p>
+          </div>
+        </section>
 
-    <div class="lists">
-      <section class="panel">
-        <h2>下载中</h2>
-        <ul id="downloadingList"></ul>
-        <div class="pager">
-          <button id="downPrev">上一页</button>
-          <span id="downInfo"></span>
-          <button id="downNext">下一页</button>
-        </div>
-      </section>
+        <section id="exploreView" style="display:none">
+          <div class="panel">
+            <h2>探索</h2>
+            <div id="exploreBreadcrumb" class="breadcrumb"></div>
+            <div class="explore-wrapper">
+              <div class="explore-main">
+                <div id="exploreList" class="grid"></div>
+              </div>
+              <div class="explore-side">
+                <div class="panel">
+                  <h2>收藏的平台</h2>
+                  <table class="side-table">
+                    <thead><tr><th>名称</th><th>信息</th><th>操作</th></tr></thead>
+                    <tbody id="favPlatforms"></tbody>
+                  </table>
+                </div>
+                <div class="panel">
+                  <h2>屏蔽的平台</h2>
+                  <table class="side-table">
+                    <thead><tr><th>名称</th><th>信息</th><th>操作</th></tr></thead>
+                    <tbody id="blkPlatforms"></tbody>
+                  </table>
+                </div>
+                <div class="panel">
+                  <h2>收藏的播放</h2>
+                  <table class="side-table">
+                    <thead><tr><th>名称</th><th>信息</th><th>操作</th></tr></thead>
+                    <tbody id="favChannels"></tbody>
+                  </table>
+                </div>
+                <div class="panel">
+                  <h2>屏蔽的播放</h2>
+                  <table class="side-table">
+                    <thead><tr><th>名称</th><th>信息</th><th>操作</th></tr></thead>
+                    <tbody id="blkChannels"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
 
-      <section class="panel">
-        <h2>已完成</h2>
-        <ul id="completedList"></ul>
-        <div class="pager">
-          <button id="compPrev">上一页</button>
-          <span id="compInfo"></span>
-          <button id="compNext">下一页</button>
-        </div>
-      </section>
-    </div>
+        <section id="downloadView" style="display:none">
+          <div class="top">
+            <form id="downloadForm">
+              <input type="text" id="title" placeholder="主播名（如：小花猫）" required />
+              <input type="url" id="url" placeholder="视频地址（http://...flv）" required />
+              <button type="submit">提交下载</button>
+            </form>
+            <form id="parseForm">
+              <textarea id="parseText" rows="1" placeholder="粘贴文本（如：柒萌KK ffmpeg -i `http://...flv` -q 0 -f flv ./柒萌KK20250101123000.flv）" required></textarea>
+              <button type="submit">解析并下载</button>
+            </form>
+          </div>
+          <div class="lists">
+            <section class="panel">
+              <h2>下载中</h2>
+              <ul id="downloadingList"></ul>
+              <div class="pager">
+                <button id="downPrev">上一页</button>
+                <span id="downInfo"></span>
+                <button id="downNext">下一页</button>
+              </div>
+            </section>
+            <section class="panel">
+              <h2>已完成</h2>
+              <ul id="completedList"></ul>
+              <div class="pager">
+                <button id="compPrev">上一页</button>
+                <span id="compInfo"></span>
+                <button id="compNext">下一页</button>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="settingsView" style="display:none">
+          <div class="panel">
+            <h2>设置</h2>
+            <div class="form-row">
+              <div class="form-label">定时调度时间间隔：</div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <input class="form-input" type="number" id="intervalInput" placeholder="请输入分钟数" min="1" max="60" />
+                <span class="form-suffix">分钟</span>
+              </div>
+              <button class="form-btn" id="saveInterval">保存</button>
+            </div>
+            <div class="form-row">
+              <div class="form-label">基础地址：</div>
+              <input class="form-input" type="url" id="baseUrlInput" placeholder="如：http://api.hclyz.com:81/mf/" />
+              <button class="form-btn" id="saveBaseUrl">保存</button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
   </div>
 
   <script src="./app.js"></script>

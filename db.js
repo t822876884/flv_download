@@ -21,6 +21,34 @@ CREATE TABLE IF NOT EXISTS tasks (
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS settings (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS platform (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  address TEXT UNIQUE NOT NULL,
+  title TEXT,
+  xinimg TEXT,
+  number INTEGER,
+  favorite INTEGER DEFAULT 0,
+  blocked INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS channel (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  platform_address TEXT NOT NULL,
+  address TEXT NOT NULL,
+  title TEXT,
+  img TEXT,
+  favorite INTEGER DEFAULT 0,
+  blocked INTEGER DEFAULT 0,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  UNIQUE(platform_address, address)
+);
 `);
 
 const insertTask = db.prepare(`
@@ -56,6 +84,67 @@ const listByStatusStmt = db.prepare(`
   LIMIT ? OFFSET ?
 `);
 
+const getSettingStmt = db.prepare(`
+  SELECT value FROM settings WHERE key = ?
+`);
+const setSettingStmt = db.prepare(`
+  INSERT INTO settings (key, value, updated_at)
+  VALUES (?, ?, ?)
+  ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+`);
+
+const upsertPlatformStmt = db.prepare(`
+  INSERT INTO platform (address, title, xinimg, number, favorite, blocked, created_at, updated_at)
+  VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+  ON CONFLICT(address) DO UPDATE SET
+    title = excluded.title,
+    xinimg = excluded.xinimg,
+    number = excluded.number,
+    updated_at = excluded.updated_at
+`);
+const getPlatformStmt = db.prepare(`
+  SELECT * FROM platform WHERE address = ?
+`);
+const togglePlatformFavoriteStmt = db.prepare(`
+  UPDATE platform SET favorite = ?, updated_at = ? WHERE address = ?
+`);
+const togglePlatformBlockedStmt = db.prepare(`
+  UPDATE platform SET blocked = ?, updated_at = ? WHERE address = ?
+`);
+const listPlatformFavoritesStmt = db.prepare(`
+  SELECT address, title, xinimg, number FROM platform WHERE favorite = 1 ORDER BY updated_at DESC
+`);
+const listPlatformBlockedStmt = db.prepare(`
+  SELECT address, title, xinimg, number FROM platform WHERE blocked = 1 ORDER BY updated_at DESC
+`);
+
+const upsertChannelStmt = db.prepare(`
+  INSERT INTO channel (platform_address, address, title, img, favorite, blocked, created_at, updated_at)
+  VALUES (?, ?, ?, ?, 0, 0, ?, ?)
+  ON CONFLICT(platform_address, address) DO UPDATE SET
+    title = excluded.title,
+    img = excluded.img,
+    updated_at = excluded.updated_at
+`);
+const getChannelStmt = db.prepare(`
+  SELECT * FROM channel WHERE platform_address = ? AND address = ?
+`);
+const toggleChannelFavoriteStmt = db.prepare(`
+  UPDATE channel SET favorite = ?, updated_at = ? WHERE platform_address = ? AND address = ?
+`);
+const toggleChannelBlockedStmt = db.prepare(`
+  UPDATE channel SET blocked = ?, updated_at = ? WHERE platform_address = ? AND address = ?
+`);
+const listChannelByPlatformStmt = db.prepare(`
+  SELECT platform_address, address, title, img, favorite, blocked FROM channel WHERE platform_address = ? ORDER BY created_at DESC
+`);
+const listChannelFavoritesStmt = db.prepare(`
+  SELECT platform_address, address, title, img FROM channel WHERE favorite = 1 ORDER BY updated_at DESC
+`);
+const listChannelBlockedStmt = db.prepare(`
+  SELECT platform_address, address, title, img FROM channel WHERE blocked = 1 ORDER BY updated_at DESC
+`);
+
 module.exports = {
   insert(task) {
     insertTask.run(task);
@@ -77,5 +166,51 @@ module.exports = {
     const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
     const items = listByStatusStmt.all(status, Math.max(1, pageSize), offset);
     return { items, total, page, pageSize };
+  },
+  getSetting(key) {
+    const r = getSettingStmt.get(key);
+    return r ? r.value : null;
+  },
+  setSetting(key, value) {
+    setSettingStmt.run(key, value, new Date().toISOString());
+  },
+  upsertPlatform(item) {
+    upsertPlatformStmt.run(item.address, item.title || null, item.xinimg || null, item.number || null, new Date().toISOString(), new Date().toISOString());
+  },
+  getPlatform(address) {
+    return getPlatformStmt.get(address);
+  },
+  togglePlatformFavorite(address, flag) {
+    togglePlatformFavoriteStmt.run(flag ? 1 : 0, new Date().toISOString(), address);
+  },
+  togglePlatformBlocked(address, flag) {
+    togglePlatformBlockedStmt.run(flag ? 1 : 0, new Date().toISOString(), address);
+  },
+  listPlatformFavorites() {
+    return listPlatformFavoritesStmt.all();
+  },
+  listPlatformBlocked() {
+    return listPlatformBlockedStmt.all();
+  },
+  upsertChannel(item) {
+    upsertChannelStmt.run(item.platform_address, item.address, item.title || null, item.img || null, new Date().toISOString(), new Date().toISOString());
+  },
+  getChannel(platform_address, address) {
+    return getChannelStmt.get(platform_address, address);
+  },
+  toggleChannelFavorite(platform_address, address, flag) {
+    toggleChannelFavoriteStmt.run(flag ? 1 : 0, new Date().toISOString(), platform_address, address);
+  },
+  toggleChannelBlocked(platform_address, address, flag) {
+    toggleChannelBlockedStmt.run(flag ? 1 : 0, new Date().toISOString(), platform_address, address);
+  },
+  listChannelsByPlatform(platform_address) {
+    return listChannelByPlatformStmt.all(platform_address);
+  },
+  listChannelFavorites() {
+    return listChannelFavoritesStmt.all();
+  },
+  listChannelBlocked() {
+    return listChannelBlockedStmt.all();
   },
 };

@@ -275,6 +275,136 @@ app.post('/download/parse', express.text({ type: ['text/plain', 'text/*', 'appli
   }
 });
 
+function ensureBaseUrl(u) {
+  let v = normalizeUrl(u || '');
+  if (!v) v = 'http://api.hclyz.com:81/mf/';
+  if (!/^https?:\/\//i.test(v)) v = 'http://api.hclyz.com:81/mf/';
+  if (!v.endsWith('/')) v += '/';
+  return v;
+}
+
+function ensureIntervalMinutes(v) {
+  const n = parseInt(String(v || '1'), 10);
+  if (isNaN(n)) return 1;
+  return Math.max(1, Math.min(60, n));
+}
+
+app.get('/config/explore_base_url', (req, res) => {
+  const v = db.getSetting('explore_base_url');
+  const base = ensureBaseUrl(v);
+  res.json({ ok: true, value: base });
+});
+
+app.post('/config/explore_base_url', (req, res) => {
+  const raw = req.body && req.body.value;
+  const base = ensureBaseUrl(raw);
+  db.setSetting('explore_base_url', base);
+  res.json({ ok: true, value: base });
+});
+
+app.get('/config/poll_interval_minutes', (req, res) => {
+  const v = db.getSetting('poll_interval_minutes');
+  const n = ensureIntervalMinutes(v);
+  res.json({ ok: true, value: n });
+});
+
+app.post('/config/poll_interval_minutes', (req, res) => {
+  const raw = req.body && req.body.value;
+  const n = ensureIntervalMinutes(raw);
+  db.setSetting('poll_interval_minutes', String(n));
+  res.json({ ok: true, value: n });
+});
+
+app.get('/explore/platforms', async (req, res) => {
+  try {
+    const base = ensureBaseUrl(db.getSetting('explore_base_url'));
+    const url = base + 'json.txt';
+    const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
+    const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+    const list = Array.isArray(data.pingtai) ? data.pingtai : [];
+    list.forEach((p) => {
+      db.upsertPlatform({ address: String(p.address || ''), title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0) });
+    });
+    const items = list.map((p) => {
+      const row = db.getPlatform(String(p.address || '')) || {};
+      return { address: String(p.address || ''), title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0), favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
+    }).filter((x) => x.address && !x.blocked);
+    const favorites = db.listPlatformFavorites();
+    const blocks = db.listPlatformBlocked();
+    res.json({ ok: true, items, favorites, blocks });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err?.message || String(err) });
+  }
+});
+
+app.get('/explore/channel', async (req, res) => {
+  try {
+    const platformAddress = String(req.query.address || '');
+    if (!platformAddress) return res.status(400).json({ ok: false, message: '缺少 address' });
+    const base = ensureBaseUrl(db.getSetting('explore_base_url'));
+    const url = base + platformAddress;
+    const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
+    const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+    const list = Array.isArray(data.zhubo) ? data.zhubo : [];
+    list.forEach((c) => {
+      db.upsertChannel({ platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null });
+    });
+    const items = list.map((c) => {
+      const row = db.getChannel(platformAddress, String(c.address || '')) || {};
+      return { platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null, favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
+    }).filter((x) => x.address && !x.blocked);
+    const favorites = db.listChannelFavorites();
+    const blocks = db.listChannelBlocked();
+    res.json({ ok: true, platform_address: platformAddress, items, favorites, blocks });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err?.message || String(err) });
+  }
+});
+
+app.post('/platform/:address/favorite', (req, res) => {
+  const address = String(req.params.address || '');
+  const flag = req.body && (req.body.favorite === 1 || req.body.favorite === '1' || req.body.favorite === true);
+  if (!address) return res.status(400).json({ ok: false, message: '缺少 address' });
+  db.togglePlatformFavorite(address, flag);
+  const row = db.getPlatform(address);
+  res.json({ ok: true, address, favorite: row && row.favorite ? 1 : 0 });
+});
+
+app.post('/platform/:address/blocked', (req, res) => {
+  const address = String(req.params.address || '');
+  const flag = req.body && (req.body.blocked === 1 || req.body.blocked === '1' || req.body.blocked === true);
+  if (!address) return res.status(400).json({ ok: false, message: '缺少 address' });
+  db.togglePlatformBlocked(address, flag);
+  if (flag) {
+    db.togglePlatformFavorite(address, false);
+  }
+  const row = db.getPlatform(address);
+  res.json({ ok: true, address, blocked: row && row.blocked ? 1 : 0 });
+});
+
+app.post('/channel/favorite', (req, res) => {
+  const platform_address = String(req.body?.platform_address || '');
+  const address = String(req.body?.address || '');
+  const flag = req.body && (req.body.favorite === 1 || req.body.favorite === '1' || req.body.favorite === true);
+  if (!platform_address || !address) return res.status(400).json({ ok: false, message: '缺少参数' });
+  db.toggleChannelFavorite(platform_address, address, flag);
+  const row = db.getChannel(platform_address, address);
+  res.json({ ok: true, platform_address, address, favorite: row && row.favorite ? 1 : 0 });
+});
+
+app.post('/channel/blocked', (req, res) => {
+  const platform_address = String(req.body?.platform_address || '');
+  const address = String(req.body?.address || '');
+  const flag = req.body && (req.body.blocked === 1 || req.body.blocked === '1' || req.body.blocked === true);
+  if (!platform_address || !address) return res.status(400).json({ ok: false, message: '缺少参数' });
+  db.toggleChannelBlocked(platform_address, address, flag);
+  if (flag) {
+    db.toggleChannelFavorite(platform_address, address, false);
+  }
+  const row = db.getChannel(platform_address, address);
+  res.json({ ok: true, platform_address, address, blocked: row && row.blocked ? 1 : 0 });
+});
+
 // 预留的播放接口占位
 app.get('/play', (req, res) => {
   res.status(501).json({ ok: false, message: '播放接口尚未实现' });
