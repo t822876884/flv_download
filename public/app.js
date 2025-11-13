@@ -1,7 +1,7 @@
 // 顶部：增加轮询控制
 const state = {
-  downloading: { page: 1, pageSize: 5, total: 0 },
-  completed: { page: 1, pageSize: 5, total: 0 },
+  downloading: { page: 1, pageSize: 10, total: 0 },
+  completed: { page: 1, pageSize: 10, total: 0 },
 };
 let downloadingPollTimer = null;
 const POLL_MS = 3000;
