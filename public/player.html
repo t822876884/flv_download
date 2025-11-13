@@ -29,22 +29,28 @@
 
     function setup(src) {
       if (flvjs.isSupported()) {
-        const player = flvjs.createPlayer({ type: 'flv', url: src });
+        const player = flvjs.createPlayer({ type: 'flv', url: src, isLive: true });
         player.attachMediaElement(document.getElementById('video'));
+        player.on(flvjs.Events.ERROR, function() {
+          try { alert('播放源不可用或服务器转封装失败'); } catch (_) {}
+        });
         player.load();
-        player.play();
+        try { player.play(); } catch (_) {}
       } else {
         document.body.innerHTML = '<p>当前浏览器不支持 flv.js</p>';
       }
     }
 
     const isHttp = (u) => { try { const p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:'; } catch (_) { return false; } };
+    const isRtmp = (u) => { try { const p = new URL(u); return p.protocol === 'rtmp:'; } catch (_) { return /^rtmp:\/\//i.test(String(u||'')); } };
     if (id) {
       setup(`/play/${encodeURIComponent(id)}`);
     } else if (url && isHttp(url)) {
       setup(`/proxy?url=${encodeURIComponent(url)}`);
     } else if (address && isHttp(address)) {
       setup(`/proxy?url=${encodeURIComponent(address)}`);
+    } else if (address && isRtmp(address)) {
+      setup(`/proxy-rtmp?url=${encodeURIComponent(address)}`);
     } else {
       document.getElementById('video').outerHTML = '<p>当前地址不可通过 flv.js 播放，仍可进行收藏/屏蔽/复制/下载（仅 http/https 可下载）。</p>';
     }
@@ -69,7 +75,10 @@
     };
     btnDl.onclick = async () => {
       const src = url || address || '';
-      if (!isHttp(src)) return alert('仅支持 http/https 地址下载');
+      if (!isHttp(src)) {
+        if (isRtmp(src)) return alert('当前不支持 rtmp 下载，仅支持 http/https');
+        return alert('仅支持 http/https 地址下载');
+      }
       const t = title || '视频';
       const r = await fetch('/download', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t, url: src }) });
       if (r.ok) alert('已提交下载'); else alert('下载提交失败');

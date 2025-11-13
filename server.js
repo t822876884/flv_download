@@ -100,6 +100,15 @@ function isHttpUrl(u) {
   }
 }
 
+function isRtmpUrl(u) {
+  try {
+    const p = new URL(u);
+    return p.protocol === 'rtmp:';
+  } catch (_) {
+    return /^rtmp:\/\//i.test(String(u || ''));
+  }
+}
+
 function startDownload(title, url) {
   const folderPath = path.resolve(BASE_DIR, title);
   fs.mkdirSync(folderPath, { recursive: true });
@@ -353,9 +362,11 @@ app.get('/explore/channel', async (req, res) => {
       const row = db.getChannel(platformAddress, String(c.address || '')) || {};
       return { platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null, favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
     }).filter((x) => x.address && !x.blocked);
+    const pRow = db.getPlatform(platformAddress) || {};
+    const platform_title = pRow && pRow.title ? pRow.title : null;
     const favorites = db.listChannelFavorites();
     const blocks = db.listChannelBlocked();
-    res.json({ ok: true, platform_address: platformAddress, items, favorites, blocks });
+    res.json({ ok: true, platform_address: platformAddress, platform_title, items, favorites, blocks });
   } catch (err) {
     res.status(500).json({ ok: false, message: err?.message || String(err) });
   }
@@ -479,6 +490,51 @@ app.get('/proxy', async (req, res) => {
     }
     res.status(500).send(`代理失败: ${err?.message || err}`);
   }
+});
+
+// 新增：RTMP → HTTP-FLV 实时转发，用于浏览器播放
+app.get('/proxy-rtmp', async (req, res) => {
+  const raw = req.query.url;
+  const url = normalizeUrl(raw);
+  if (!url || !isRtmpUrl(url)) return res.status(400).send('缺少 rtmp:// URL');
+
+  res.setHeader('Content-Type', 'video/x-flv');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const { spawn } = require('child_process');
+  // 直接复制音视频并封装为 FLV；若源编码浏览器不支持，可改为转码
+  const ff = spawn('ffmpeg', [
+    '-loglevel', 'error',
+    '-rtmp_transport', 'tcp',
+    '-rtmp_live', 'live',
+    '-i', url,
+    '-fflags', '+genpts',
+    '-re',
+    '-analyzeduration', '0',
+    '-probesize', '8192',
+    '-c:v', 'copy',
+    '-c:a', 'aac',
+    '-ar', '44100',
+    '-f', 'flv',
+    'pipe:1',
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
+  let started = false;
+  ff.stdout.on('data', (chunk) => {
+    if (!started) { started = true; }
+    res.write(chunk);
+  });
+  ff.stderr.on('data', (buf) => { try { console.error('[proxy-rtmp]', String(buf)); } catch (_) {} });
+  ff.on('close', (code) => {
+    if (!res.headersSent) {
+      res.statusCode = 500;
+    }
+    try { res.end(); } catch (_) {}
+  });
+  ff.on('error', (err) => {
+    try { res.status(500).send('ffmpeg 不可用或启动失败: ' + (err?.message || String(err))); } catch (_) {}
+  });
+  req.on('close', () => { try { ff.kill('SIGINT'); } catch (_) {} });
 });
 
 // 新增：取消下载（按 title 取消），并清理已下载的部分文件

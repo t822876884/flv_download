@@ -46,6 +46,9 @@ const state = {
 let downloadingPollTimer = null;
 let POLL_MS = 10000;
 
+// 平台标题缓存（address -> title）
+const platformTitleMap = new Map();
+
 function fmtTime(iso) {
   if (!iso) return '';
   const d = new Date(iso);
@@ -267,7 +270,8 @@ function addListItem(container, key, text) {
     meta = '平台';
   } else if (id === 'favChannels' || id === 'blkChannels') {
     const pa = String(key).split('|')[0] || '';
-    meta = `来源：${pa}`;
+    const pt = platformTitleMap.get(pa) || pa;
+    meta = `来源：${pt}`;
   }
 
   if (isTableBody) {
@@ -320,6 +324,7 @@ async function loadExplore() {
   favC.innerHTML = '';
   blkC.innerHTML = '';
   bc.textContent = '平台列表';
+  bc.onclick = null;
 
   const r = await fetch('/explore/platforms');
   const d = await r.json();
@@ -351,6 +356,7 @@ async function loadExplore() {
   }
 
   items.forEach((p) => {
+    platformTitleMap.set(p.address, p.title || p.address);
     platformMap.set(p.address, p);
     const card = createPlatformCard(p);
     listEl.appendChild(card);
@@ -398,7 +404,9 @@ async function loadExplore() {
     }
     const card = e.target.closest('.card');
     if (card && card.dataset.address) {
-      await loadChannel(card.dataset.address);
+      const titleEl = card.querySelector('.card-title');
+      const title = titleEl ? titleEl.textContent : (platformTitleMap.get(card.dataset.address) || card.dataset.address);
+      await loadChannel(card.dataset.address, title);
     }
   };
 
@@ -454,7 +462,7 @@ async function loadExplore() {
   };
 }
 
-async function loadChannel(address) {
+async function loadChannel(address, platformTitle) {
   const listEl = document.getElementById('exploreList');
   const favC = document.getElementById('favChannels');
   const blkC = document.getElementById('blkChannels');
@@ -462,12 +470,22 @@ async function loadChannel(address) {
   listEl.innerHTML = '';
   favC.innerHTML = '';
   blkC.innerHTML = '';
-  bc.textContent = `平台：${address}`;
+  const title = platformTitle || platformTitleMap.get(address) || address;
+  bc.innerHTML = `<button class="back-btn" data-op="back">⟵ 返回平台列表</button> 平台：${title}`;
+  bc.onclick = (e) => {
+    const btn = e.target.closest('[data-op="back"]');
+    if (btn) {
+      loadExplore();
+    }
+  };
 
   const r = await fetch(`/explore/channel?address=${encodeURIComponent(address)}`);
   const d = await r.json();
   const items = Array.isArray(d.items) ? d.items : [];
   const channelMap = new Map();
+  const platformName = d.platform_title || title;
+  platformTitleMap.set(address, platformName);
+  bc.innerHTML = `<button class="back-btn" data-op="back">⟵ 返回平台列表</button> 平台：${platformName}`;
 
   function createChannelCard(c) {
     const card = document.createElement('div');
@@ -480,7 +498,7 @@ async function loadChannel(address) {
         <div class="thumb">${c.img ? `<img src="${c.img}" alt="">` : ''}</div>
         <div>
           <div class="card-title">${c.title || c.address}</div>
-          <div class="card-meta">来源：${c.platform_address}</div>
+          <div class="card-meta">来源：${platformName}</div>
           <div class="card-ops">
             <button class="icon-btn icon-heart ${c.favorite ? 'active' : ''}" title="收藏" data-op="fav" data-platform="${encodeURIComponent(c.platform_address)}" data-address="${encodeURIComponent(c.address)}">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.7-4.3-9.3-7.5C1.6 12.3 1 10.9 1 9.4 1 6.5 3.4 4 6.3 4c1.7 0 3.3.8 4.3 2.1C11.4 4.8 13 4 14.7 4 17.6 4 20 6.5 20 9.4c0 1.5-.6 2.9-1.7 4.1C18.7 16.7 12 21 12 21z"></path></svg>
