@@ -1,4 +1,7 @@
-// 顶部：增加 db 与静态目录挂载
+// 服务主入口：Express + SQLite
+// - 认证路由与守卫来自 routes/auth
+// - 通用工具与调度来自 lib/utils 与 lib/scheduler
+// - 日志采用 lib/logger，按请求与系统级输出
 require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
@@ -6,24 +9,37 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
+const logger = require('./lib/logger');
+const {
+  sanitizeName,
+  normalizeUrl,
+  toggleHttpScheme,
+  timestampString,
+  isHttpUrl,
+  isRtmpUrl,
+  ensureBaseUrl,
+  ensureIntervalMinutes,
+} = require('./lib/utils');
+const { startChannelUpdateScheduler } = require('./lib/scheduler');
 
+const sysLog = logger.child({ scope: 'system' });
 process.on('uncaughtException', (err) => {
-  console.error('[uncaughtException]', err && err.stack ? err.stack : err);
+  sysLog.error('uncaughtException', { err: err && err.stack ? err.stack : String(err) });
 });
 process.on('uncaughtExceptionMonitor', (err) => {
-  console.error('[uncaughtExceptionMonitor]', err && err.stack ? err.stack : err);
+  sysLog.error('uncaughtExceptionMonitor', { err: err && err.stack ? err.stack : String(err) });
 });
 process.on('unhandledRejection', (reason) => {
-  console.error('[unhandledRejection]', reason && reason.stack ? reason.stack : reason);
+  sysLog.error('unhandledRejection', { err: reason && reason.stack ? reason.stack : String(reason) });
 });
 ['SIGINT', 'SIGTERM'].forEach((sig) => {
   process.on(sig, () => {
-    console.error('[signal]', sig);
+    sysLog.warn('signal', { sig });
     process.exit(0);
   });
 });
 process.on('exit', (code) => {
-  console.error('[exit]', code);
+  sysLog.info('exit', { code });
 });
 
 axios.interceptors.response.use(
@@ -31,77 +47,17 @@ axios.interceptors.response.use(
   (e) => {
     const m = e && e.config && e.config.method ? String(e.config.method).toUpperCase() : '-';
     const u = e && e.config && e.config.url ? e.config.url : '-';
-    console.error('[axios]', m, u, e && e.stack ? e.stack : e);
+    sysLog.error('axios', { method: m, url: u, err: e && e.stack ? e.stack : String(e) });
     return Promise.reject(e);
   }
 );
 
 const app = express();
 app.use(express.json({ limit: '1mb' }));
+app.use(logger.requestLogger());
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const rid = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  req.rid = rid;
-  console.log('[request]', rid, req.method, req.originalUrl);
-  res.on('finish', () => {
-    console.log('[response]', rid, res.statusCode, (Date.now() - start) + 'ms');
-  });
-  next();
-});
-
-const ADMIN_USER = 'flvAdmin';
-const ADMIN_PASS = 'Llyscysykr01!';
-const sessions = new Map();
-
-function parseCookies(str) {
-  const out = {};
-  if (!str) return out;
-  String(str).split(';').forEach((p) => {
-    const i = p.indexOf('=');
-    if (i > 0) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
-  });
-  return out;
-}
-
-function authGuard(req, res, next) {
-  const allow = ['/auth/login', '/auth/logout', '/login', '/login.html'];
-  if (allow.includes(req.path)) return next();
-  const ck = parseCookies(req.headers.cookie || '');
-  const sid = ck.sid || '';
-  const sess = sid ? sessions.get(sid) : null;
-  if (sess && sess.exp > Date.now()) return next();
-  if (req.method === 'GET') {
-    const p = path.join(process.cwd(), 'public', 'login.html');
-    return fs.existsSync(p) ? res.sendFile(p) : res.status(401).send('未登录');
-  }
-  return res.status(401).json({ ok: false, message: '未登录' });
-}
-
-app.post('/auth/login', (req, res) => {
-  const u = String(req.body?.username || '');
-  const p = String(req.body?.password || '');
-  if (u === ADMIN_USER && p === ADMIN_PASS) {
-    const sid = crypto.randomBytes(24).toString('hex');
-    sessions.set(sid, { exp: Date.now() + 2 * 60 * 60 * 1000 });
-    res.setHeader('Set-Cookie', `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax`);
-    return res.json({ ok: true });
-  }
-  return res.status(401).json({ ok: false, message: '用户名或密码错误' });
-});
-
-app.post('/auth/logout', (req, res) => {
-  const ck = parseCookies(req.headers.cookie || '');
-  const sid = ck.sid || '';
-  if (sid) sessions.delete(sid);
-  res.setHeader('Set-Cookie', 'sid=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0');
-  res.json({ ok: true });
-});
-
-app.get('/login', (req, res) => {
-  const p = path.join(process.cwd(), 'public', 'login.html');
-  res.sendFile(p);
-});
+const { registerAuth, authGuard } = require('./routes/auth');
+registerAuth(app);
 
 app.use(authGuard);
 app.use(express.static(path.join(process.cwd(), 'public')));
@@ -112,58 +68,7 @@ fs.mkdirSync(BASE_DIR, { recursive: true });
 
 const activeDownloads = new Map();
 
-function sanitizeName(name) {
-  const trimmed = (name || '').trim();
-  if (!trimmed) return '';
-  return trimmed.replace(/[<>:"/\\|?*\u0000-\u001F]/g, '').replace(/\s+/g, ' ').trim();
-}
-
-function normalizeUrl(raw) {
-  if (!raw) return '';
-  let u = String(raw).trim();
-  u = u.replace(/^`+|`+$/g, '').replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '').trim();
-  return u;
-}
-
-function toggleHttpScheme(u) {
-  try {
-    const p = new URL(u);
-    p.protocol = p.protocol === 'http:' ? 'https:' : (p.protocol === 'https:' ? 'http:' : p.protocol);
-    return p.href;
-  } catch (_) {
-    return u;
-  }
-}
-
-function timestampString(d = new Date()) {
-  const pad = (n) => String(n).padStart(2, '0');
-  const Y = d.getFullYear();
-  const M = pad(d.getMonth() + 1);
-  const D = pad(d.getDate());
-  const h = pad(d.getHours());
-  const m = pad(d.getMinutes());
-  const s = pad(d.getSeconds());
-  return `${Y}${M}${D}${h}${m}${s}`;
-}
-
-// 新增：通用校验与启动函数
-function isHttpUrl(u) {
-  try {
-    const p = new URL(u);
-    return p.protocol === 'http:' || p.protocol === 'https:';
-  } catch (_) {
-    return false;
-  }
-}
-
-function isRtmpUrl(u) {
-  try {
-    const p = new URL(u);
-    return p.protocol === 'rtmp:';
-  } catch (_) {
-    return /^rtmp:\/\//i.test(String(u || ''));
-  }
-}
+// 使用 lib/utils 中的通用工具函数
 
 function startDownload(title, url) {
   const folderPath = path.resolve(BASE_DIR, title);
@@ -204,7 +109,8 @@ function startDownload(title, url) {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } catch (_) {}
     db.setStatus(id, 'error');
-    console.error('[download-error]', id, title, err && err.stack ? err.stack : err);
+    const log = logger.child({ scope: 'download', id, title });
+    log.error('download-error', { err: err && err.stack ? err.stack : String(err) });
   };
 
   const tryGet = (u, attempt = 0) => {
@@ -340,19 +246,7 @@ app.post('/download/parse', express.text({ type: ['text/plain', 'text/*', 'appli
   }
 });
 
-function ensureBaseUrl(u) {
-  let v = normalizeUrl(u || '');
-  if (!v) v = 'http://api.hclyz.com:81/mf/';
-  if (!/^https?:\/\//i.test(v)) v = 'http://api.hclyz.com:81/mf/';
-  if (!v.endsWith('/')) v += '/';
-  return v;
-}
-
-function ensureIntervalMinutes(v) {
-  const n = parseInt(String(v || '1'), 10);
-  if (isNaN(n)) return 1;
-  return Math.max(1, Math.min(60, n));
-}
+// 使用 lib/utils 中的配置校验函数
 
 app.get('/config/explore_base_url', (req, res) => {
   const v = db.getSetting('explore_base_url');
@@ -399,6 +293,7 @@ app.get('/explore/platforms', async (req, res) => {
     const blocks = db.listPlatformBlocked();
     res.json({ ok: true, items, favorites, blocks });
   } catch (err) {
+    if (req.log) req.log.error('explore-platforms-error', { err: err?.stack || String(err) });
     res.status(500).json({ ok: false, message: err?.message || String(err) });
   }
 });
@@ -422,6 +317,7 @@ app.get('/explore/channel', async (req, res) => {
     const blocks = db.listChannelBlocked();
     res.json({ ok: true, platform_address: platformAddress, platform_title, items, favorites, blocks });
   } catch (err) {
+    if (req.log) req.log.error('explore-channel-error', { err: err?.stack || String(err) });
     res.status(500).json({ ok: false, message: err?.message || String(err) });
   }
 });
@@ -628,7 +524,7 @@ app.get('/proxy-rtmp', async (req, res) => {
     if (!started) { started = true; }
     res.write(chunk);
   });
-  ff.stderr.on('data', (buf) => { try { console.error('[proxy-rtmp]', String(buf)); } catch (_) {} });
+  ff.stderr.on('data', (buf) => { try { sysLog.warn('proxy-rtmp', { err: String(buf) }); } catch (_) {} });
   ff.on('close', (code) => {
     if (!res.headersSent) {
       res.statusCode = 500;
@@ -724,72 +620,11 @@ app.get('/tasks', (req, res) => {
 const PORT = process.env.PORT || 3180;
 app.use((err, req, res, next) => {
   const rid = req && req.rid ? req.rid : '-';
-  console.error('[route-error]', rid, req.method, req.originalUrl, err && err.stack ? err.stack : err);
+  const log = logger.child({ rid, method: req.method, url: req.originalUrl });
+  log.error('route-error', { err: err && err.stack ? err.stack : String(err) });
   res.status(500).json({ ok: false, message: 'internal error' });
 });
 app.listen(PORT, () => {
-  console.log(`Video server listening on http://localhost:${PORT}`);
+  sysLog.info('listening', { url: `http://localhost:${PORT}` });
 });
-function ensureBaseUrl(v) {
-  const def = 'http://api.hclyz.com:81/mf/';
-  let s = String(v || def).trim();
-  if (!s) s = def;
-  if (!s.endsWith('/')) s += '/';
-  return s;
-}
-
-function ensureIntervalMinutes(v) {
-  const n = parseInt(String(v || '10'), 10);
-  if (isNaN(n)) return 10;
-  return Math.max(1, Math.min(60, n));
-}
-
-let channelUpdateTimer = null;
-async function updateFavoriteChannelAddresses() {
-  try {
-    try { db.clearFavoriteChannelAddresses(); } catch (_) {}
-    const favorites = db.listChannelFavorites();
-    if (!favorites || favorites.length === 0) return;
-    const favPlatforms = db.listPlatformFavorites();
-    let platforms = favPlatforms && favPlatforms.length > 0
-      ? favPlatforms.map(p => ({ address: p.address, title: p.title }))
-      : db.listTopPlatformsUnblocked(5);
-    if (!platforms || platforms.length === 0) return;
-    const base = ensureBaseUrl(db.getSetting('explore_base_url'));
-    const titleToAddr = new Map();
-    for (const p of platforms) {
-      try {
-        const url = base + String(p.address || '');
-        const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
-        const data = r && r.data && typeof r.data === 'object' ? r.data : {};
-        const list = Array.isArray(data.zhubo) ? data.zhubo : [];
-        list.forEach((c) => {
-          if (c && c.title) {
-            const t = String(c.title);
-            const a = c.address ? String(c.address) : null;
-            if (a && !titleToAddr.has(t)) titleToAddr.set(t, a);
-          }
-        });
-      } catch (e) {}
-    }
-    favorites.forEach(f => {
-      const t = String(f.title);
-      const a = titleToAddr.get(t) || null;
-      if (a) {
-        db.updateChannelAddressByTitle(t, a);
-      }
-    });
-  } catch (err) {
-    console.error('[channel-update]', err?.stack || err);
-  }
-}
-
-function startChannelUpdateScheduler() {
-  const minutes = ensureIntervalMinutes(db.getSetting('poll_interval_minutes'));
-  if (channelUpdateTimer) clearInterval(channelUpdateTimer);
-  channelUpdateTimer = setInterval(updateFavoriteChannelAddresses, minutes * 60 * 1000);
-  // 立即执行一次，确保首页初始数据
-  updateFavoriteChannelAddresses();
-}
-
 startChannelUpdateScheduler();
