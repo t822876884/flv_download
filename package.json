@@ -5,6 +5,10 @@
   "scripts": {
     "start": "node server.js",
     "serve": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 node server.js",
+    "pm2:start": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 pm2 start server.js --name flv_download",
+    "pm2:restart": "pm2 restart flv_download",
+    "pm2:stop": "pm2 stop flv_download && pm2 delete flv_download",
+    "pm2:logs": "pm2 logs flv_download --lines 100",
     "compose:up": "docker compose up -d",
     "compose:down": "docker compose down"
   },
@@ -16,6 +20,7 @@
     "axios": "^1.13.2",
     "better-sqlite3": "^12.4.1",
     "dotenv": "^16.6.1",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "pm2": "^5.3.0"
   }
 }
