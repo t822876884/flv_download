@@ -54,6 +54,11 @@ function registerChannels(app) {
     const rows = db.listChannelBlocked();
     res.json({ ok: true, items: rows });
   });
+
+  app.get('/channels/with_address', (req, res) => {
+    const rows = db.listChannelsWithAddress();
+    res.json({ ok: true, items: rows });
+  });
 }
 
 module.exports = { registerChannels };

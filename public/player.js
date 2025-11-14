@@ -1,6 +1,6 @@
 function getQuery() {
   const q = new URLSearchParams(location.search);
-  return { id: q.get('id'), url: q.get('url'), address: q.get('address'), title: q.get('title') };
+  return { id: q.get('id'), url: q.get('url'), address: q.get('address'), title: q.get('title'), platform: q.get('platform') };
 }
 
 const state = {
@@ -80,15 +80,22 @@ function updateOps(item) {
   blkBtn.disabled = !t;
 }
 
-async function loadFavorites() {
+async function loadPlatformChannels(platformAddress) {
   try {
-    const r = await fetch('/channels/favorites');
+    const r = await fetch(`/explore/channel?address=${encodeURIComponent(platformAddress)}`);
     const d = await r.json();
-    const items = (Array.isArray(d.items) ? d.items : []).filter((c) => c && (c.address || c.title));
+    const items = (Array.isArray(d.items) ? d.items : []).map((c) => ({ title: c.title || '', address: c.address || '' }));
+    state.list = items.filter((c) => c.address);
+  } catch (_) { state.list = []; }
+}
+
+async function loadChannelsWithAddress() {
+  try {
+    const r = await fetch('/channels/with_address');
+    const d = await r.json();
+    const items = (Array.isArray(d.items) ? d.items : []).filter((c) => c && c.address);
     state.list = items;
-  } catch (_) {
-    state.list = [];
-  }
+  } catch (_) { state.list = []; }
 }
 
 function findIndexByQuery(q) {
@@ -102,12 +109,14 @@ function findIndexByQuery(q) {
 
 async function bootstrap() {
   const q = getQuery();
-  await loadFavorites();
+  if (q.platform) {
+    await loadPlatformChannels(q.platform);
+  } else {
+    await loadChannelsWithAddress();
+  }
   const idx = findIndexByQuery(q);
   renderList();
-  if (idx >= 0) {
-    setCurrent(idx);
-  } else {
+  if (idx >= 0) setCurrent(idx); else if (state.list.length > 0) setCurrent(0); else {
     roomTitleEl.textContent = q.title || '播放';
     const src0 = (() => {
       if (q.id) return `/play/${encodeURIComponent(q.id)}`;

@@ -602,7 +602,7 @@ async function loadChannel(address, platformTitle) {
     if (card) {
       const ad = card.dataset.address;
       const title = card.dataset.title || '';
-      window.open(`/player.html?address=${encodeURIComponent(ad)}&title=${encodeURIComponent(title)}`, '_blank');
+      window.open(`/player.html?platform=${encodeURIComponent(address)}&address=${encodeURIComponent(ad)}&title=${encodeURIComponent(title)}`, '_blank');
     }
   };
 

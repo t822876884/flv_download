@@ -173,6 +173,9 @@ const listChannelFavoritesStmt = db.prepare(`
 const listChannelBlockedStmt = db.prepare(`
   SELECT title, address FROM channel WHERE blocked = 1 ORDER BY updated_at DESC
 `);
+const listChannelsWithAddressStmt = db.prepare(`
+  SELECT title, address FROM channel WHERE address IS NOT NULL ORDER BY updated_at DESC
+`);
 const listTopPlatformsUnblockedStmt = db.prepare(`
   SELECT address, title FROM platform WHERE blocked = 0 ORDER BY updated_at DESC LIMIT ?
 `);
@@ -251,6 +254,9 @@ module.exports = {
   },
   listChannelBlocked() {
     return listChannelBlockedStmt.all();
+  },
+  listChannelsWithAddress() {
+    return listChannelsWithAddressStmt.all();
   },
   listTopPlatformsUnblocked(limit) {
     return listTopPlatformsUnblockedStmt.all(limit);
