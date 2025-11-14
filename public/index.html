@@ -124,6 +124,20 @@
               <input class="form-input" type="url" id="baseUrlInput" placeholder="如：http://api.hclyz.com:81/mf/" />
               <button class="form-btn" id="saveBaseUrl">保存</button>
             </div>
+            <div class="form-row">
+              <div class="form-label">原密码：</div>
+              <input class="form-input" type="password" id="oldPwd" placeholder="请输入当前管理员密码" />
+              <button class="form-btn" id="savePwd">修改密码</button>
+            </div>
+            <div class="form-row">
+              <div class="form-label">新密码：</div>
+              <input class="form-input" type="password" id="newPwd" placeholder="至少 8 位" />
+            </div>
+            <div class="form-row">
+              <div class="form-label">确认新密码：</div>
+              <input class="form-input" type="password" id="newPwd2" placeholder="再次输入新密码" />
+              <span id="pwdMsg" class="form-suffix"></span>
+            </div>
           </div>
         </section>
       </div>

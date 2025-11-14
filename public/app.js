@@ -6,6 +6,25 @@ const routes = {
   settings: 'settingsView',
 };
 
+const __origFetch = window.fetch.bind(window);
+window.fetch = async function() {
+  const res = await __origFetch.apply(window, arguments);
+  if (res.status === 401) {
+    location.href = '/login';
+    throw new Error('unauthorized');
+  }
+  const ct = res.headers.get('content-type') || '';
+  try {
+    const u = new URL(res.url, location.origin);
+    const isLogin = u.pathname === '/login' || u.pathname === '/login.html';
+    if (ct.includes('text/html') && !isLogin) {
+      location.href = '/login';
+      throw new Error('unauthorized');
+    }
+  } catch (_) {}
+  return res;
+};
+
 function setActiveMenu(hash) {
   document.querySelectorAll('.menu-item').forEach((a) => {
     a.classList.toggle('active', a.getAttribute('href') === hash);
@@ -342,10 +361,20 @@ async function loadExplore() {
   blkP.innerHTML = '';
   favC.innerHTML = '';
   blkC.innerHTML = '';
-  bc.textContent = '平台列表';
-  bc.onclick = null;
+  bc.innerHTML = '平台列表 <button class="back-btn" data-op="sync">同步平台</button>';
+  bc.onclick = async (e) => {
+    const btn = e.target.closest('[data-op="sync"]');
+    if (btn) {
+      btn.disabled = true;
+      try {
+        const r = await fetch('/platforms/sync', { method: 'POST' });
+        if (!r.ok) { try { const d = await r.json(); alert(d.message || '同步失败'); } catch (_) { alert('同步失败'); } }
+        await loadExplore();
+      } finally { btn.disabled = false; }
+    }
+  };
 
-  const r = await fetch('/explore/platforms');
+  const r = await fetch('/platforms');
   const d = await r.json();
   const items = Array.isArray(d.items) ? d.items : [];
   const platformMap = new Map();
@@ -728,4 +757,27 @@ async function loadHomeFavorites() {
       }
     };
   } catch (_) {}
+}
+const savePwdBtn = document.getElementById('savePwd');
+if (savePwdBtn) {
+  savePwdBtn.addEventListener('click', async () => {
+    const oldPwd = document.getElementById('oldPwd').value.trim();
+    const newPwd = document.getElementById('newPwd').value.trim();
+    const newPwd2 = document.getElementById('newPwd2').value.trim();
+    const msgEl = document.getElementById('pwdMsg');
+    if (!newPwd || newPwd.length < 8) { msgEl.textContent = '新密码长度至少 8 位'; return; }
+    if (newPwd !== newPwd2) { msgEl.textContent = '两次输入不一致'; return; }
+    msgEl.textContent = '';
+    const r = await fetch('/auth/change_password', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }) });
+    if (r.ok) {
+      alert('密码已更新');
+      document.getElementById('oldPwd').value = '';
+      document.getElementById('newPwd').value = '';
+      document.getElementById('newPwd2').value = '';
+    } else {
+      let d = { message: '修改失败' };
+      try { d = await r.json(); } catch (_) {}
+      msgEl.textContent = d.message || '修改失败';
+    }
+  });
 }

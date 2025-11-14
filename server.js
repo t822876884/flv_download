@@ -58,6 +58,8 @@ app.use(logger.requestLogger());
 
 const { registerAuth, authGuard } = require('./routes/auth');
 registerAuth(app);
+const { registerExplore } = require('./routes/explore');
+registerExplore(app);
 
 app.use(authGuard);
 app.use(express.static(path.join(process.cwd(), 'public')));

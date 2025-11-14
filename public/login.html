@@ -22,11 +22,20 @@
 <body>
   <div class="card">
     <h2 class="title">管理员登录</h2>
-    <div class="row"><input id="u" placeholder="用户名" autocomplete="username" /></div>
-    <div class="row"><input id="p" type="password" placeholder="密码" autocomplete="current-password" /></div>
-    <div class="row"><button id="btn">登录</button></div>
-    <div id="err" class="err"></div>
-    <div class="tip">仅限管理员使用</div>
+    <div id="loginBox">
+      <div class="row"><input id="u" placeholder="用户名" autocomplete="username" /></div>
+      <div class="row"><input id="p" type="password" placeholder="密码" autocomplete="current-password" /></div>
+      <div class="row"><button id="btn">登录</button></div>
+      <div id="err" class="err"></div>
+      <div class="tip">仅限管理员使用</div>
+    </div>
+    <div id="changeBox" style="display:none">
+      <div class="row"><input id="newp" type="password" placeholder="请设置新密码（至少 8 位）" autocomplete="new-password" /></div>
+      <div class="row"><input id="newp2" type="password" placeholder="再次确认新密码" autocomplete="new-password" /></div>
+      <div class="row"><button id="saveBtn">保存新密码</button></div>
+      <div id="err2" class="err"></div>
+      <div class="tip">为保证安全，首次登录或默认密码需立即修改</div>
+    </div>
   </div>
   <script>
     const btn=document.getElementById('btn');
@@ -34,7 +43,26 @@
       const username=document.getElementById('u').value.trim();
       const password=document.getElementById('p').value.trim();
       const r=await fetch('/auth/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username,password})});
-      if(r.ok){ location.href='/'; } else { const d=await r.json().catch(()=>({message:'登录失败'})); document.getElementById('err').textContent=d.message||'登录失败'; }
+      const d=await r.json().catch(()=>({}));
+      if(r.ok){
+        if(d && d.require_change===1){
+          document.getElementById('loginBox').style.display='none';
+          document.getElementById('changeBox').style.display='';
+          const saveBtn=document.getElementById('saveBtn');
+          saveBtn.onclick=async()=>{
+            const np=document.getElementById('newp').value.trim();
+            const np2=document.getElementById('newp2').value.trim();
+            if(!np || np.length<8){ document.getElementById('err2').textContent='新密码长度至少 8 位'; return; }
+            if(np!==np2){ document.getElementById('err2').textContent='两次输入不一致'; return; }
+            const r2=await fetch('/auth/change_password',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({old_password:password,new_password:np})});
+            if(r2.ok){ location.href='/'; } else { const d2=await r2.json().catch(()=>({message:'修改失败'})); document.getElementById('err2').textContent=d2.message||'修改失败'; }
+          };
+        } else {
+          location.href='/';
+        }
+      } else {
+        document.getElementById('err').textContent=(d && d.message) || '登录失败';
+      }
     };
   </script>
 </body>

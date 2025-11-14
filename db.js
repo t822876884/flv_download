@@ -147,6 +147,12 @@ const listPlatformFavoritesStmt = db.prepare(`
 const listPlatformBlockedStmt = db.prepare(`
   SELECT address, title, xinimg, number FROM platform WHERE blocked = 1 ORDER BY updated_at DESC
 `);
+const listPlatformsStmt = db.prepare(`
+  SELECT address, title, xinimg, number, favorite, blocked FROM platform ORDER BY id ASC
+`);
+const clearPlatformsStmt = db.prepare(`
+  DELETE FROM platform
+`);
 
 const upsertChannelByTitleStmt = db.prepare(`
   INSERT INTO channel (title, address, favorite, blocked, created_at, updated_at)
@@ -233,6 +239,12 @@ module.exports = {
   },
   listPlatformBlocked() {
     return listPlatformBlockedStmt.all();
+  },
+  listPlatforms() {
+    return listPlatformsStmt.all();
+  },
+  clearPlatforms() {
+    return clearPlatformsStmt.run();
   },
   upsertChannelByTitle(item) {
     upsertChannelByTitleStmt.run(item.title, item.address || null, new Date().toISOString(), new Date().toISOString());

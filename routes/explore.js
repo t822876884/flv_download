@@ -3,6 +3,39 @@ const db = require('../db');
 const { ensureBaseUrl } = require('../lib/utils');
 
 function registerExplore(app) {
+  app.get('/platforms', (req, res) => {
+    const rows = db.listPlatforms();
+    const items = rows.filter((x) => x && x.address && !x.blocked);
+    const favorites = db.listPlatformFavorites();
+    const blocks = db.listPlatformBlocked();
+    res.json({ ok: true, items, favorites, blocks });
+  });
+
+  app.post('/platforms/sync', async (req, res) => {
+    try {
+      const favs = db.listPlatformFavorites().map((p) => p.address);
+      const blks = db.listPlatformBlocked().map((p) => p.address);
+      db.clearPlatforms();
+      const base = ensureBaseUrl(db.getSetting('explore_base_url'));
+      const url = base + 'json.txt';
+      const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
+      const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+      const list = Array.isArray(data.pingtai) ? data.pingtai : [];
+      list.forEach((p) => {
+        const address = String(p.address || '');
+        db.upsertPlatform({ address, title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0) });
+        if (address) {
+          if (favs.includes(address)) db.togglePlatformFavorite(address, true);
+          if (blks.includes(address)) db.togglePlatformBlocked(address, true);
+        }
+      });
+      const rows = db.listPlatforms();
+      const items = rows.filter((x) => x && x.address && !x.blocked);
+      res.json({ ok: true, count: items.length });
+    } catch (err) {
+      res.status(500).json({ ok: false, message: err?.message || String(err) });
+    }
+  });
   app.get('/explore/platforms', async (req, res) => {
     try {
       const base = ensureBaseUrl(db.getSetting('explore_base_url'));
