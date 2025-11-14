@@ -27,18 +27,26 @@
     }
     const { id, url, platform, address, title } = getQuery();
 
+    let player = null;
+    let retryCount = 0;
+    const maxRetry = 5;
     function setup(src) {
-      if (flvjs.isSupported()) {
-        const player = flvjs.createPlayer({ type: 'flv', url: src, isLive: true });
-        player.attachMediaElement(document.getElementById('video'));
-        player.on(flvjs.Events.ERROR, function() {
-          try { alert('播放源不可用或服务器转封装失败'); } catch (_) {}
-        });
-        player.load();
-        try { player.play(); } catch (_) {}
-      } else {
+      if (!flvjs.isSupported()) {
         document.body.innerHTML = '<p>当前浏览器不支持 flv.js</p>';
+        return;
       }
+      if (player) { try { player.unload(); player.detachMediaElement(); player.destroy(); } catch (_) {} player = null; }
+      player = flvjs.createPlayer({ type: 'flv', url: src, isLive: true, enableWorker: true });
+      player.attachMediaElement(document.getElementById('video'));
+      player.on(flvjs.Events.ERROR, function() {
+        if (retryCount < maxRetry) {
+          const delay = Math.min(3000, 500 * Math.pow(2, retryCount));
+          retryCount++;
+          setTimeout(() => { setup(src); }, delay);
+        }
+      });
+      player.load();
+      try { player.play(); } catch (_) {}
     }
 
     const isHttp = (u) => { try { const p = new URL(u); return p.protocol === 'http:' || p.protocol === 'https:'; } catch (_) { return false; } };
@@ -60,17 +68,18 @@
     const btnDl = document.getElementById('btnDl');
     const btnCopy = document.getElementById('btnCopy');
 
-    const canChannelOps = !!(platform && address);
+    const canChannelOps = !!title;
     if (!canChannelOps) { btnFav.disabled = true; btnBlk.disabled = true; }
 
     btnFav.onclick = async () => {
-      if (!canChannelOps) return alert('缺少平台信息，无法收藏');
-      await fetch('/channel/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: platform, address, favorite: 1 }) });
+      if (!canChannelOps) return alert('缺少标题，无法收藏');
+      const src = url || address || '';
+      await fetch('/channel/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, address: src, favorite: 1 }) });
       alert('已收藏');
     };
     btnBlk.onclick = async () => {
-      if (!canChannelOps) return alert('缺少平台信息，无法屏蔽');
-      await fetch('/channel/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: platform, address, blocked: 1 }) });
+      if (!canChannelOps) return alert('缺少标题，无法屏蔽');
+      await fetch('/channel/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, blocked: 1 }) });
       alert('已屏蔽');
     };
     btnDl.onclick = async () => {

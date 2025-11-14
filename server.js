@@ -378,6 +378,7 @@ app.post('/config/poll_interval_minutes', (req, res) => {
   const n = ensureIntervalMinutes(raw);
   db.setSetting('poll_interval_minutes', String(n));
   res.json({ ok: true, value: n });
+  startChannelUpdateScheduler();
 });
 
 app.get('/explore/platforms', async (req, res) => {
@@ -411,11 +412,8 @@ app.get('/explore/channel', async (req, res) => {
     const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
     const data = r && r.data && typeof r.data === 'object' ? r.data : {};
     const list = Array.isArray(data.zhubo) ? data.zhubo : [];
-    list.forEach((c) => {
-      db.upsertChannel({ platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null });
-    });
     const items = list.map((c) => {
-      const row = db.getChannel(platformAddress, String(c.address || '')) || {};
+      const row = c.title ? db.getChannelByTitle(String(c.title)) || {} : {};
       return { platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null, favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
     }).filter((x) => x.address && !x.blocked);
     const pRow = db.getPlatform(platformAddress) || {};
@@ -450,26 +448,39 @@ app.post('/platform/:address/blocked', (req, res) => {
 });
 
 app.post('/channel/favorite', (req, res) => {
-  const platform_address = String(req.body?.platform_address || '');
-  const address = String(req.body?.address || '');
+  const title = String(req.body?.title || '');
+  const address = req.body?.address ? String(req.body.address) : null;
   const flag = req.body && (req.body.favorite === 1 || req.body.favorite === '1' || req.body.favorite === true);
-  if (!platform_address || !address) return res.status(400).json({ ok: false, message: '缺少参数' });
-  db.toggleChannelFavorite(platform_address, address, flag);
-  const row = db.getChannel(platform_address, address);
-  res.json({ ok: true, platform_address, address, favorite: row && row.favorite ? 1 : 0 });
+  if (!title) return res.status(400).json({ ok: false, message: '缺少 title' });
+  const now = new Date().toISOString();
+  const row = db.getChannelByTitle(title);
+  if (!row) db.upsertChannelByTitle({ title, address });
+  if (address) db.updateChannelAddressByTitle(title, address);
+  db.toggleChannelFavoriteByTitle(title, flag);
+  const ret = db.getChannelByTitle(title);
+  res.json({ ok: true, title, address: ret?.address || null, favorite: ret?.favorite ? 1 : 0 });
 });
 
 app.post('/channel/blocked', (req, res) => {
-  const platform_address = String(req.body?.platform_address || '');
-  const address = String(req.body?.address || '');
+  const title = String(req.body?.title || '');
   const flag = req.body && (req.body.blocked === 1 || req.body.blocked === '1' || req.body.blocked === true);
-  if (!platform_address || !address) return res.status(400).json({ ok: false, message: '缺少参数' });
-  db.toggleChannelBlocked(platform_address, address, flag);
-  if (flag) {
-    db.toggleChannelFavorite(platform_address, address, false);
-  }
-  const row = db.getChannel(platform_address, address);
-  res.json({ ok: true, platform_address, address, blocked: row && row.blocked ? 1 : 0 });
+  if (!title) return res.status(400).json({ ok: false, message: '缺少 title' });
+  const row = db.getChannelByTitle(title);
+  if (!row) db.upsertChannelByTitle({ title, address: null });
+  db.toggleChannelBlockedByTitle(title, flag);
+  if (flag) db.toggleChannelFavoriteByTitle(title, false);
+  const ret = db.getChannelByTitle(title);
+  res.json({ ok: true, title, blocked: ret?.blocked ? 1 : 0 });
+});
+
+app.get('/channels/favorites', (req, res) => {
+  const rows = db.listChannelFavorites();
+  res.json({ ok: true, items: rows });
+});
+
+app.get('/channels/blocked', (req, res) => {
+  const rows = db.listChannelBlocked();
+  res.json({ ok: true, items: rows });
 });
 
 // 预留的播放接口占位
@@ -520,32 +531,69 @@ app.get('/proxy', async (req, res) => {
   const url = normalizeUrl(raw);
   if (!url) return res.status(400).send('缺少 url');
 
-  try {
-    const response = await axios.get(url, {
+  const http = require('http');
+  const https = require('https');
+  const httpAgent = new http.Agent({ keepAlive: true });
+  const httpsAgent = new https.Agent({ keepAlive: true });
+  const controller = new AbortController();
+  let closed = false;
+  const ua = 'Mozilla/5.0';
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'video/x-flv');
+  res.setHeader('Cache-Control', 'no-store');
+
+  req.on('close', () => { closed = true; try { controller.abort(); } catch (_) {} });
+  res.on('close', () => { closed = true; try { controller.abort(); } catch (_) {} });
+
+  const maxAttempts = 3;
+  const baseDelay = 800;
+
+  async function fetchOnce(u) {
+    return axios.get(u, {
       responseType: 'stream',
-      timeout: 1000 * 60 * 5,
+      timeout: 1000 * 60 * 2,
+      signal: controller.signal,
+      headers: { 'User-Agent': ua, Accept: '*/*', Connection: 'keep-alive' },
+      httpAgent,
+      httpsAgent,
+      maxRedirects: 5,
       validateStatus: (s) => s >= 200 && s < 400,
     });
-    res.setHeader('Content-Type', 'video/x-flv');
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    response.data.pipe(res);
-  } catch (err) {
-    const msg = String(err?.message || '');
-    if (/protocol/i.test(msg)) {
-      try {
-        const alt = toggleHttpScheme(url);
-        const response = await axios.get(alt, {
-          responseType: 'stream',
-          timeout: 1000 * 60 * 5,
-          validateStatus: (s) => s >= 200 && s < 400,
-        });
-        res.setHeader('Content-Type', 'video/x-flv');
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        return response.data.pipe(res);
-      } catch (_) {}
-    }
-    res.status(500).send(`代理失败: ${err?.message || err}`);
   }
+
+  async function tryStream(u, attempt) {
+    try {
+      const r = await fetchOnce(u);
+      if (closed) return;
+      r.data.on('error', async (e) => {
+        if (closed) return;
+        if (attempt + 1 < maxAttempts) {
+          const delay = baseDelay * Math.pow(2, attempt);
+          await new Promise((ok) => setTimeout(ok, delay));
+          tryStream(u, attempt + 1);
+        } else {
+          try { res.status(502).end('代理失败'); } catch (_) {}
+        }
+      });
+      r.data.pipe(res);
+    } catch (err) {
+      const msg = String(err?.message || '');
+      if (attempt === 0 && /protocol/i.test(msg)) {
+        try {
+          const alt = toggleHttpScheme(u);
+          return tryStream(alt, attempt + 1);
+        } catch (_) {}
+      }
+      if (attempt + 1 < maxAttempts) {
+        const delay = baseDelay * Math.pow(2, attempt);
+        await new Promise((ok) => setTimeout(ok, delay));
+        return tryStream(u, attempt + 1);
+      }
+      try { res.status(500).end(`代理失败: ${err?.message || err}`); } catch (_) {}
+    }
+  }
+
+  tryStream(url, 0);
 });
 
 // 新增：RTMP → HTTP-FLV 实时转发，用于浏览器播放
@@ -682,3 +730,66 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   console.log(`Video server listening on http://localhost:${PORT}`);
 });
+function ensureBaseUrl(v) {
+  const def = 'http://api.hclyz.com:81/mf/';
+  let s = String(v || def).trim();
+  if (!s) s = def;
+  if (!s.endsWith('/')) s += '/';
+  return s;
+}
+
+function ensureIntervalMinutes(v) {
+  const n = parseInt(String(v || '10'), 10);
+  if (isNaN(n)) return 10;
+  return Math.max(1, Math.min(60, n));
+}
+
+let channelUpdateTimer = null;
+async function updateFavoriteChannelAddresses() {
+  try {
+    try { db.clearFavoriteChannelAddresses(); } catch (_) {}
+    const favorites = db.listChannelFavorites();
+    if (!favorites || favorites.length === 0) return;
+    const favPlatforms = db.listPlatformFavorites();
+    let platforms = favPlatforms && favPlatforms.length > 0
+      ? favPlatforms.map(p => ({ address: p.address, title: p.title }))
+      : db.listTopPlatformsUnblocked(5);
+    if (!platforms || platforms.length === 0) return;
+    const base = ensureBaseUrl(db.getSetting('explore_base_url'));
+    const titleToAddr = new Map();
+    for (const p of platforms) {
+      try {
+        const url = base + String(p.address || '');
+        const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
+        const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+        const list = Array.isArray(data.zhubo) ? data.zhubo : [];
+        list.forEach((c) => {
+          if (c && c.title) {
+            const t = String(c.title);
+            const a = c.address ? String(c.address) : null;
+            if (a && !titleToAddr.has(t)) titleToAddr.set(t, a);
+          }
+        });
+      } catch (e) {}
+    }
+    favorites.forEach(f => {
+      const t = String(f.title);
+      const a = titleToAddr.get(t) || null;
+      if (a) {
+        db.updateChannelAddressByTitle(t, a);
+      }
+    });
+  } catch (err) {
+    console.error('[channel-update]', err?.stack || err);
+  }
+}
+
+function startChannelUpdateScheduler() {
+  const minutes = ensureIntervalMinutes(db.getSetting('poll_interval_minutes'));
+  if (channelUpdateTimer) clearInterval(channelUpdateTimer);
+  channelUpdateTimer = setInterval(updateFavoriteChannelAddresses, minutes * 60 * 1000);
+  // 立即执行一次，确保首页初始数据
+  updateFavoriteChannelAddresses();
+}
+
+startChannelUpdateScheduler();

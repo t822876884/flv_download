@@ -39,17 +39,47 @@ CREATE TABLE IF NOT EXISTS platform (
 );
 CREATE TABLE IF NOT EXISTS channel (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  platform_address TEXT NOT NULL,
-  address TEXT NOT NULL,
-  title TEXT,
-  img TEXT,
+  title TEXT UNIQUE NOT NULL,
+  address TEXT,
   favorite INTEGER DEFAULT 0,
   blocked INTEGER DEFAULT 0,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL,
-  UNIQUE(platform_address, address)
+  updated_at TEXT NOT NULL
 );
 `);
+
+try {
+  const info = db.prepare("PRAGMA table_info('channel')").all();
+  const hasOldCols = Array.isArray(info) && info.some(c => c.name === 'platform_address');
+  if (hasOldCols) {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS channel_new (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT UNIQUE NOT NULL,
+        address TEXT,
+        favorite INTEGER DEFAULT 0,
+        blocked INTEGER DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    const rows = db.prepare("SELECT title, address, favorite, blocked, created_at, updated_at FROM channel WHERE title IS NOT NULL ORDER BY updated_at DESC").all();
+    const seen = new Set();
+    const ins = db.prepare("INSERT INTO channel_new (title, address, favorite, blocked, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)");
+    const now = new Date().toISOString();
+    const txn = db.transaction(() => {
+      rows.forEach(r => {
+        const t = r.title || null;
+        if (!t || seen.has(t)) return;
+        seen.add(t);
+        ins.run(t, r.address || null, r.favorite ? 1 : 0, r.blocked ? 1 : 0, r.created_at || now, r.updated_at || now);
+      });
+    });
+    txn();
+    db.exec("DROP TABLE channel");
+    db.exec("ALTER TABLE channel_new RENAME TO channel");
+  }
+} catch (_) {}
 
 const insertTask = db.prepare(`
   INSERT INTO tasks (id, title, url, save_dir, file_path, status, created_at, updated_at)
@@ -118,31 +148,40 @@ const listPlatformBlockedStmt = db.prepare(`
   SELECT address, title, xinimg, number FROM platform WHERE blocked = 1 ORDER BY updated_at DESC
 `);
 
-const upsertChannelStmt = db.prepare(`
-  INSERT INTO channel (platform_address, address, title, img, favorite, blocked, created_at, updated_at)
-  VALUES (?, ?, ?, ?, 0, 0, ?, ?)
-  ON CONFLICT(platform_address, address) DO UPDATE SET
-    title = excluded.title,
-    img = excluded.img,
+const upsertChannelByTitleStmt = db.prepare(`
+  INSERT INTO channel (title, address, favorite, blocked, created_at, updated_at)
+  VALUES (?, ?, 0, 0, ?, ?)
+  ON CONFLICT(title) DO UPDATE SET
+    address = excluded.address,
     updated_at = excluded.updated_at
 `);
-const getChannelStmt = db.prepare(`
-  SELECT * FROM channel WHERE platform_address = ? AND address = ?
+const getChannelByTitleStmt = db.prepare(`
+  SELECT * FROM channel WHERE title = ?
 `);
-const toggleChannelFavoriteStmt = db.prepare(`
-  UPDATE channel SET favorite = ?, updated_at = ? WHERE platform_address = ? AND address = ?
+const toggleChannelFavoriteByTitleStmt = db.prepare(`
+  UPDATE channel SET favorite = ?, updated_at = ? WHERE title = ?
 `);
-const toggleChannelBlockedStmt = db.prepare(`
-  UPDATE channel SET blocked = ?, updated_at = ? WHERE platform_address = ? AND address = ?
+const toggleChannelBlockedByTitleStmt = db.prepare(`
+  UPDATE channel SET blocked = ?, updated_at = ? WHERE title = ?
 `);
-const listChannelByPlatformStmt = db.prepare(`
-  SELECT platform_address, address, title, img, favorite, blocked FROM channel WHERE platform_address = ? ORDER BY created_at DESC
+const updateChannelAddressByTitleStmt = db.prepare(`
+  UPDATE channel SET address = ?, updated_at = ? WHERE title = ?
 `);
 const listChannelFavoritesStmt = db.prepare(`
-  SELECT platform_address, address, title, img FROM channel WHERE favorite = 1 ORDER BY updated_at DESC
+  SELECT title, address FROM channel WHERE favorite = 1 ORDER BY updated_at DESC
 `);
 const listChannelBlockedStmt = db.prepare(`
-  SELECT platform_address, address, title, img FROM channel WHERE blocked = 1 ORDER BY updated_at DESC
+  SELECT title, address FROM channel WHERE blocked = 1 ORDER BY updated_at DESC
+`);
+const listTopPlatformsUnblockedStmt = db.prepare(`
+  SELECT address, title FROM platform WHERE blocked = 0 ORDER BY updated_at DESC LIMIT ?
+`);
+
+const clearAllChannelAddressesStmt = db.prepare(`
+  UPDATE channel SET address = NULL, updated_at = ?
+`);
+const clearFavoriteChannelAddressesStmt = db.prepare(`
+  UPDATE channel SET address = NULL, updated_at = ? WHERE favorite = 1
 `);
 
 module.exports = {
@@ -192,25 +231,34 @@ module.exports = {
   listPlatformBlocked() {
     return listPlatformBlockedStmt.all();
   },
-  upsertChannel(item) {
-    upsertChannelStmt.run(item.platform_address, item.address, item.title || null, item.img || null, new Date().toISOString(), new Date().toISOString());
+  upsertChannelByTitle(item) {
+    upsertChannelByTitleStmt.run(item.title, item.address || null, new Date().toISOString(), new Date().toISOString());
   },
-  getChannel(platform_address, address) {
-    return getChannelStmt.get(platform_address, address);
+  getChannelByTitle(title) {
+    return getChannelByTitleStmt.get(title);
   },
-  toggleChannelFavorite(platform_address, address, flag) {
-    toggleChannelFavoriteStmt.run(flag ? 1 : 0, new Date().toISOString(), platform_address, address);
+  toggleChannelFavoriteByTitle(title, flag) {
+    toggleChannelFavoriteByTitleStmt.run(flag ? 1 : 0, new Date().toISOString(), title);
   },
-  toggleChannelBlocked(platform_address, address, flag) {
-    toggleChannelBlockedStmt.run(flag ? 1 : 0, new Date().toISOString(), platform_address, address);
+  toggleChannelBlockedByTitle(title, flag) {
+    toggleChannelBlockedByTitleStmt.run(flag ? 1 : 0, new Date().toISOString(), title);
   },
-  listChannelsByPlatform(platform_address) {
-    return listChannelByPlatformStmt.all(platform_address);
+  updateChannelAddressByTitle(title, address) {
+    updateChannelAddressByTitleStmt.run(address || null, new Date().toISOString(), title);
   },
   listChannelFavorites() {
     return listChannelFavoritesStmt.all();
   },
   listChannelBlocked() {
     return listChannelBlockedStmt.all();
+  },
+  listTopPlatformsUnblocked(limit) {
+    return listTopPlatformsUnblockedStmt.all(limit);
+  },
+  clearAllChannelAddresses() {
+    return clearAllChannelAddressesStmt.run(new Date().toISOString());
+  },
+  clearFavoriteChannelAddresses() {
+    return clearFavoriteChannelAddressesStmt.run(new Date().toISOString());
   },
 };

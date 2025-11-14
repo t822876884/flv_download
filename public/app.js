@@ -24,11 +24,31 @@ function showView(name) {
     refresh('downloading');
     refresh('completed');
     startDownloadingPoll();
+    if (homeFavoritesTimer) { clearInterval(homeFavoritesTimer); homeFavoritesTimer = null; }
   } else if (name === 'settings') {
     loadSettings();
+    if (homeFavoritesTimer) { clearInterval(homeFavoritesTimer); homeFavoritesTimer = null; }
   } else if (name === 'explore') {
     loadExplore();
+    if (homeFavoritesTimer) { clearInterval(homeFavoritesTimer); homeFavoritesTimer = null; }
+  } else if (name === 'home') {
+    loadHomeFavorites();
+    startHomeFavoritesPoll();
   }
+}
+
+function startHomeFavoritesPoll() {
+  try {
+    fetch('/config/poll_interval_minutes')
+      .then((r) => r.json())
+      .then((d) => {
+        const n = (d && d.value) ? parseInt(d.value, 10) : 1;
+        const ms = Math.max(1, n) * 60 * 1000;
+        if (homeFavoritesTimer) clearInterval(homeFavoritesTimer);
+        homeFavoritesTimer = setInterval(loadHomeFavorites, ms);
+      })
+      .catch(() => {});
+  } catch (_) {}
 }
 
 function router() {
@@ -45,6 +65,7 @@ const state = {
 };
 let downloadingPollTimer = null;
 let POLL_MS = 10000;
+let homeFavoritesTimer = null;
 
 // 平台标题缓存（address -> title）
 const platformTitleMap = new Map();
@@ -269,17 +290,15 @@ function addListItem(container, key, text) {
   if (id === 'favPlatforms' || id === 'blkPlatforms') {
     meta = '平台';
   } else if (id === 'favChannels' || id === 'blkChannels') {
-    const pa = String(key).split('|')[0] || '';
-    const pt = platformTitleMap.get(pa) || pa;
-    meta = `来源：${pt}`;
+    meta = '';
   }
 
   if (isTableBody) {
     const opBtn = (() => {
       if (id === 'favPlatforms') return `<button data-op="removeFavPlatform" data-address="${encodeURIComponent(key)}">移除</button>`;
       if (id === 'blkPlatforms') return `<button data-op="removeBlkPlatform" data-address="${encodeURIComponent(key)}">移除</button>`;
-      if (id === 'favChannels') return `<button data-op="removeFavChannel" data-platform="${encodeURIComponent(String(key).split('|')[0] || '')}" data-address="${encodeURIComponent(String(key).split('|')[1] || '')}">移除</button>`;
-      if (id === 'blkChannels') return `<button data-op="removeBlkChannel" data-platform="${encodeURIComponent(String(key).split('|')[0] || '')}" data-address="${encodeURIComponent(String(key).split('|')[1] || '')}">移除</button>`;
+      if (id === 'favChannels') return `<button data-op="removeFavChannel" data-title="${encodeURIComponent(key)}">移除</button>`;
+      if (id === 'blkChannels') return `<button data-op="removeBlkChannel" data-title="${encodeURIComponent(key)}">移除</button>`;
       return '';
     })();
     const html = `<td class="title">${text}</td><td class="meta">${meta}</td><td class="ops">${opBtn}</td>`;
@@ -292,8 +311,8 @@ function addListItem(container, key, text) {
     const opBtn = (() => {
       if (id === 'favPlatforms') return `<button data-op="removeFavPlatform" data-address="${encodeURIComponent(key)}">移除</button>`;
       if (id === 'blkPlatforms') return `<button data-op="removeBlkPlatform" data-address="${encodeURIComponent(key)}">移除</button>`;
-      if (id === 'favChannels') return `<button data-op="removeFavChannel" data-platform="${encodeURIComponent(String(key).split('|')[0] || '')}" data-address="${encodeURIComponent(String(key).split('|')[1] || '')}">移除</button>`;
-      if (id === 'blkChannels') return `<button data-op="removeBlkChannel" data-platform="${encodeURIComponent(String(key).split('|')[0] || '')}" data-address="${encodeURIComponent(String(key).split('|')[1] || '')}">移除</button>`;
+      if (id === 'favChannels') return `<button data-op="removeFavChannel" data-title="${encodeURIComponent(key)}">移除</button>`;
+      if (id === 'blkChannels') return `<button data-op="removeBlkChannel" data-title="${encodeURIComponent(key)}">移除</button>`;
       return '';
     })();
     const html = `<div class="row"><div class="title">${text}</div><div class="meta">${meta}</div><div class="ops">${opBtn}</div></div>`;
@@ -417,6 +436,26 @@ async function loadExplore() {
     addListItem(blkP, p.address, p.title || p.address);
   });
 
+  // 在平台列表页加载全局收藏/屏蔽的频道清单
+  try {
+    const rFavC = await fetch('/channels/favorites');
+    const dFavC = await rFavC.json();
+    const favItems = Array.isArray(dFavC.items) ? dFavC.items : [];
+    favItems.forEach((c) => {
+      const key = c.title || '';
+      addListItem(favC, key, c.title || c.address);
+    });
+  } catch (_) {}
+  try {
+    const rBlkC = await fetch('/channels/blocked');
+    const dBlkC = await rBlkC.json();
+    const blkItems = Array.isArray(dBlkC.items) ? dBlkC.items : [];
+    blkItems.forEach((c) => {
+      const key = c.title || '';
+      addListItem(blkC, key, c.title || c.address);
+    });
+  } catch (_) {}
+
   favP.onclick = async (e) => {
     const btn = e.target.closest('button');
     if (!btn) return;
@@ -490,7 +529,6 @@ async function loadChannel(address, platformTitle) {
   function createChannelCard(c) {
     const card = document.createElement('div');
     card.className = 'card clickable';
-    card.dataset.platform = c.platform_address;
     card.dataset.address = c.address;
     card.dataset.title = c.title || '';
     card.innerHTML = `
@@ -500,10 +538,10 @@ async function loadChannel(address, platformTitle) {
           <div class="card-title">${c.title || c.address}</div>
           <div class="card-meta">来源：${platformName}</div>
           <div class="card-ops">
-            <button class="icon-btn icon-heart ${c.favorite ? 'active' : ''}" title="收藏" data-op="fav" data-platform="${encodeURIComponent(c.platform_address)}" data-address="${encodeURIComponent(c.address)}">
+            <button class="icon-btn icon-heart ${c.favorite ? 'active' : ''}" title="收藏" data-op="fav" data-address="${encodeURIComponent(c.address)}">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.7-4.3-9.3-7.5C1.6 12.3 1 10.9 1 9.4 1 6.5 3.4 4 6.3 4c1.7 0 3.3.8 4.3 2.1C11.4 4.8 13 4 14.7 4 17.6 4 20 6.5 20 9.4c0 1.5-.6 2.9-1.7 4.1C18.7 16.7 12 21 12 21z"></path></svg>
             </button>
-            <button class="icon-btn icon-block ${c.blocked ? 'active' : ''}" title="屏蔽" data-op="blk" data-platform="${encodeURIComponent(c.platform_address)}" data-address="${encodeURIComponent(c.address)}">
+            <button class="icon-btn icon-block ${c.blocked ? 'active' : ''}" title="屏蔽" data-op="blk" data-address="${encodeURIComponent(c.address)}">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><line x1="7" y1="17" x2="17" y2="7"></line></svg>
             </button>
           </div>
@@ -523,7 +561,6 @@ async function loadChannel(address, platformTitle) {
   listEl.onclick = async (e) => {
     const btn = e.target.closest('button');
     if (btn) {
-      const pa = decodeURIComponent(btn.dataset.platform || '');
       const ad = decodeURIComponent(btn.dataset.address || '');
       const card = btn.closest('.card');
       if (btn.dataset.op === 'fav') {
@@ -531,12 +568,12 @@ async function loadChannel(address, platformTitle) {
         const r = await fetch('/channel/favorite', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ platform_address: pa, address: ad, favorite: next }),
+          body: JSON.stringify({ title: card.dataset.title || '', address: ad, favorite: next }),
         });
         if (r.ok) {
           btn.classList.toggle('active', next === 1);
           const text = (card && card.dataset && card.dataset.title) ? card.dataset.title : ad;
-          const key = pa + '|' + ad;
+          const key = text;
           if (next === 1) addListItem(favC, key, text); else removeListItem(favC, key);
         }
       } else if (btn.dataset.op === 'blk') {
@@ -544,12 +581,12 @@ async function loadChannel(address, platformTitle) {
         const r = await fetch('/channel/blocked', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ platform_address: pa, address: ad, blocked: next }),
+          body: JSON.stringify({ title: card.dataset.title || '', blocked: next }),
         });
         if (r.ok) {
           btn.classList.toggle('active', next === 1);
           const text = (card && card.dataset && card.dataset.title) ? card.dataset.title : ad;
-          const key = pa + '|' + ad;
+          const key = text;
           if (next === 1) addListItem(blkC, key, text); else removeListItem(blkC, key);
           if (next === 1) {
             removeListItem(favC, key);
@@ -563,19 +600,18 @@ async function loadChannel(address, platformTitle) {
     }
     const card = e.target.closest('.card');
     if (card) {
-      const pa = card.dataset.platform;
       const ad = card.dataset.address;
       const title = card.dataset.title || '';
-      window.open(`/player.html?platform=${encodeURIComponent(pa)}&address=${encodeURIComponent(ad)}&title=${encodeURIComponent(title)}`, '_blank');
+      window.open(`/player.html?address=${encodeURIComponent(ad)}&title=${encodeURIComponent(title)}`, '_blank');
     }
   };
 
   (d.favorites || []).forEach((c) => {
-    const key = c.platform_address + '|' + c.address;
+    const key = c.title || '';
     addListItem(favC, key, c.title || c.address);
   });
   (d.blocks || []).forEach((c) => {
-    const key = c.platform_address + '|' + c.address;
+    const key = c.title || '';
     addListItem(blkC, key, c.title || c.address);
   });
 
@@ -583,14 +619,13 @@ async function loadChannel(address, platformTitle) {
     const btn = e.target.closest('button');
     if (!btn) return;
     if (btn.dataset.op === 'removeFavChannel') {
-      const pa = decodeURIComponent(btn.dataset.platform || '');
-      const ad = decodeURIComponent(btn.dataset.address || '');
+      const title = btn.closest('tr,li')?.querySelector('.title')?.textContent || '';
       const r = await fetch('/channel/favorite', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: pa, address: ad, favorite: 0 }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, favorite: 0 }),
       });
       if (r.ok) {
-        removeListItem(favC, pa + '|' + ad);
-        const card = Array.from(listEl.querySelectorAll('.card')).find((el) => el.dataset.platform === pa && el.dataset.address === ad);
+        removeListItem(favC, title);
+        const card = Array.from(listEl.querySelectorAll('.card')).find((el) => (el.dataset.title || '') === title);
         if (card) {
           const heart = card.querySelector('.icon-heart');
           if (heart) heart.classList.remove('active');
@@ -603,20 +638,18 @@ async function loadChannel(address, platformTitle) {
     const btn = e.target.closest('button');
     if (!btn) return;
     if (btn.dataset.op === 'removeBlkChannel') {
-      const pa = decodeURIComponent(btn.dataset.platform || '');
-      const ad = decodeURIComponent(btn.dataset.address || '');
+      const title = btn.closest('tr,li')?.querySelector('.title')?.textContent || '';
       const r = await fetch('/channel/blocked', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ platform_address: pa, address: ad, blocked: 0 }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, blocked: 0 }),
       });
       if (r.ok) {
-        removeListItem(blkC, pa + '|' + ad);
-        let card = Array.from(listEl.querySelectorAll('.card')).find((el) => el.dataset.platform === pa && el.dataset.address === ad);
+        removeListItem(blkC, title);
+        let card = Array.from(listEl.querySelectorAll('.card')).find((el) => (el.dataset.title || '') === title);
         if (card) {
           const blk = card.querySelector('.icon-block');
           if (blk) blk.classList.remove('active');
         } else {
-          const key = pa + '|' + ad;
-          const c = channelMap.get(key);
+          const c = Array.from(channelMap.values()).find(v => (v.title || '') === title);
           if (c) {
             const newCard = createChannelCard(c);
             listEl.appendChild(newCard);
@@ -636,4 +669,63 @@ if (logoutBtn) {
     try { await fetch('/auth/logout', { method: 'POST' }); } catch (_) {}
     location.href = '/login';
   };
+}
+async function loadHomeFavorites() {
+  const wrap = document.getElementById('homeFavorites');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  try {
+    const r = await fetch('/channels/favorites');
+    const d = await r.json();
+    const items = (Array.isArray(d.items) ? d.items : []).filter((c) => c && c.address);
+    items.forEach((c) => {
+      const card = document.createElement('div');
+      card.className = 'card clickable';
+      card.dataset.address = c.address || '';
+      card.dataset.title = c.title || '';
+      card.innerHTML = `
+        <div class="card-row">
+          <div class="thumb"></div>
+          <div>
+            <div class="card-title">${c.title || ''}</div>
+            <div class="card-meta">收藏频道</div>
+            <div class="card-ops">
+              <button class="icon-btn icon-heart active" title="取消收藏" data-op="fav">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-6.7-4.3-9.3-7.5C1.6 12.3 1 10.9 1 9.4 1 6.5 3.4 4 6.3 4c1.7 0 3.3.8 4.3 2.1C11.4 4.8 13 4 14.7 4 17.6 4 20 6.5 20 9.4c0 1.5-.6 2.9-1.7 4.1C18.7 16.7 12 21 12 21z"></path></svg>
+              </button>
+              <button class="icon-btn icon-block" title="屏蔽" data-op="blk">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><line x1="7" y1="17" x2="17" y2="7"></line></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+      wrap.appendChild(card);
+    });
+
+    wrap.onclick = async (e) => {
+      const btn = e.target.closest('button');
+      if (btn) {
+        const card = btn.closest('.card');
+        const title = card?.dataset?.title || '';
+        const address = card?.dataset?.address || '';
+        if (btn.dataset.op === 'fav') {
+          const r2 = await fetch('/channel/favorite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, favorite: 0 }) });
+          if (r2.ok) card.remove();
+          return;
+        }
+        if (btn.dataset.op === 'blk') {
+          const r3 = await fetch('/channel/blocked', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, blocked: 1 }) });
+          if (r3.ok) card.remove();
+          return;
+        }
+      }
+      const card = e.target.closest('.card');
+      if (card) {
+        const title = card.dataset.title || '';
+        const address = card.dataset.address || '';
+        if (address) window.open(`/player.html?address=${encodeURIComponent(address)}&title=${encodeURIComponent(title)}`, '_blank');
+      }
+    };
+  } catch (_) {}
 }
