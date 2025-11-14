@@ -5,7 +5,8 @@
   "scripts": {
     "start": "node server.js",
     "serve": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 node server.js",
-    "pm2:start": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 pm2 start server.js --name flv_download",
+    "pm2:start": "PORT=3180 DATA_DIR=./data/videos DB_PATH=./data/tasks.sqlite3 pm2 start server.js --name flv_download --update-env --wait-ready --kill-timeout 3600000",
+    "pm2:reload": "pm2 reload flv_download --update-env",
     "pm2:restart": "pm2 restart flv_download",
     "pm2:stop": "pm2 stop flv_download && pm2 delete flv_download",
     "pm2:logs": "pm2 logs flv_download --lines 100",

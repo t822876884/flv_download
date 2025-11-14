@@ -32,11 +32,32 @@ process.on('uncaughtExceptionMonitor', (err) => {
 process.on('unhandledRejection', (reason) => {
   sysLog.error('unhandledRejection', { err: reason && reason.stack ? reason.stack : String(reason) });
 });
+let draining = false;
+function beginDrain(reason) {
+  if (draining) return;
+  draining = true;
+  sysLog.warn('drain-start', { reason });
+  const GRACE_MS = parseInt(process.env.GRACEFUL_TIMEOUT_MS || '6000000', 10);
+  const end = Date.now() + GRACE_MS;
+  try {
+    if (server && typeof server.close === 'function') {
+      server.close(() => {
+        sysLog.warn('http-closed');
+      });
+    }
+  } catch (_) {}
+  const check = () => {
+    if (activeDownloads.size === 0 || Date.now() >= end) {
+      sysLog.warn('drain-exit', { remaining: activeDownloads.size });
+      process.exit(0);
+    } else {
+      setTimeout(check, 1000);
+    }
+  };
+  check();
+}
 ['SIGINT', 'SIGTERM'].forEach((sig) => {
-  process.on(sig, () => {
-    sysLog.warn('signal', { sig });
-    process.exit(0);
-  });
+  process.on(sig, () => beginDrain(sig));
 });
 process.on('exit', (code) => {
   sysLog.info('exit', { code });
@@ -161,9 +182,12 @@ app.post('/download', async (req, res) => {
     const rawTitle = req.body?.title;
     const title = sanitizeName(rawTitle);
 
-    if (!url || !title || !isHttpUrl(url)) {
-      return res.status(400).json({ ok: false, message: '缺少必填参数或 URL 非 http/https' });
-    }
+  if (!url || !title || !isHttpUrl(url)) {
+    return res.status(400).json({ ok: false, message: '缺少必填参数或 URL 非 http/https' });
+  }
+  if (draining) {
+    return res.status(503).json({ ok: false, message: '服务升级中，暂停新下载' });
+  }
 
     if (activeDownloads.has(title)) {
       return res.status(200).json({
@@ -225,9 +249,12 @@ app.post('/download/parse', express.text({ type: ['text/plain', 'text/*', 'appli
     }
     let title = sanitizeName(titleCandidate) || '视频';
 
-    if (!url || !isHttpUrl(url) || !title) {
-      return res.status(400).json({ ok: false, message: '无法从文本中解析到有效的 URL/标题' });
-    }
+  if (!url || !isHttpUrl(url) || !title) {
+    return res.status(400).json({ ok: false, message: '无法从文本中解析到有效的 URL/标题' });
+  }
+  if (draining) {
+    return res.status(503).json({ ok: false, message: '服务升级中，暂停新下载' });
+  }
 
     if (activeDownloads.has(title)) {
       return res.status(200).json({
@@ -626,7 +653,8 @@ app.use((err, req, res, next) => {
   log.error('route-error', { err: err && err.stack ? err.stack : String(err) });
   res.status(500).json({ ok: false, message: 'internal error' });
 });
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   sysLog.info('listening', { url: `http://localhost:${PORT}` });
+  try { if (typeof process.send === 'function') process.send('ready'); } catch (_) {}
 });
 startChannelUpdateScheduler();
