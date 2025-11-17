@@ -88,7 +88,7 @@ function registerExplore(app) {
         const address = String(c.address || '');
         const favorite = title && favSet.has(String(title)) ? 1 : 0;
         const blocked = title && blkSet.has(String(title)) ? 1 : 0;
-        return { platform_address: platformAddress, address, title, img: c.img || null, favorite, blocked };
+        return { platform_address: platformAddress, address, title, favorite, blocked };
       }).filter((x) => x.address && !x.blocked);
       const pRow = db.getPlatform(platformAddress) || {};
       const platform_title = pRow && pRow.title ? pRow.title : null;
