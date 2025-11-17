@@ -6,13 +6,13 @@
   <style>
     * { box-sizing: border-box; }
     body { margin:0; background:#0f0f10; color:#eee; font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Arial, sans-serif; }
-    .page { display:flex; height:100vh; padding:16px; gap:16px; }
+    .page { display:flex; min-height:100vh; padding:16px; gap:16px; }
     .left { flex:1; display:flex; flex-direction:column; gap:12px; }
     .header { height:48px; display:flex; align-items:center; padding:0 12px; background:#151518; border-radius:8px; border:1px solid #222; }
     .header .title { font-size:16px; font-weight:600; color:#f0b24a; }
-    .player { flex:1; display:flex; gap:12px; padding:12px; background:#151518; border-radius:8px; border:1px solid #222; }
-    .player-main { flex:1; display:flex; align-items:center; justify-content:center; }
-    video { width:100%; height:100%; background:#000; border-radius:6px; }
+    .player { display:flex; gap:12px; padding:12px; background:#151518; border-radius:8px; border:1px solid #222; }
+    .player-main { flex:1; display:flex; align-items:center; justify-content:center; height:540px; }
+    video { width:100%; height:100%; background:#000; border-radius:6px; object-fit:contain; }
     .player-side { width:120px; display:flex; flex-direction:column; gap:8px; }
     .btn { height:36px; border-radius:6px; border:1px solid #333; background:#1c1c20; color:#ddd; cursor:pointer; }
     .btn:disabled { opacity:.6; cursor:not-allowed; }
@@ -52,3 +52,6 @@
   <script type="module" src="./player.js"></script>
 </body>
 </html>
+    @media (max-width: 100px) {
+      .player-main { height: 62vh; }
+    }

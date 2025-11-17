@@ -54,13 +54,22 @@ function computeSrc(item) {
 
 function renderList() {
   listEl.innerHTML = '';
+  if (!state.list || state.list.length === 0) {
+    const div = document.createElement('div');
+    div.className = 'item';
+    div.textContent = '加载中或暂无列表';
+    listEl.appendChild(div);
+    return;
+  }
+  const frag = document.createDocumentFragment();
   state.list.forEach((c, i) => {
     const div = document.createElement('div');
     div.className = 'item' + (i === state.index ? ' active' : '');
     div.textContent = c.title || c.address || '未命名';
     div.dataset.index = String(i);
-    listEl.appendChild(div);
+    frag.appendChild(div);
   });
+  listEl.appendChild(frag);
 }
 
 function setCurrent(i) {
@@ -109,26 +118,19 @@ function findIndexByQuery(q) {
 
 async function bootstrap() {
   const q = getQuery();
-  if (q.platform) {
-    await loadPlatformChannels(q.platform);
-  } else {
-    await loadChannelsWithAddress();
-  }
+  let initialPlayed = false;
+  const src0 = (() => {
+    if (q.id) return `/play/${encodeURIComponent(q.id)}`;
+    const src = q.url || q.address || '';
+    if (isHttp(src)) return `/proxy?url=${encodeURIComponent(src)}`;
+    if (isRtmp(src)) return `/proxy-rtmp?url=${encodeURIComponent(src)}`;
+    return '';
+  })();
+  if (src0) { setup(src0); initialPlayed = true; roomTitleEl.textContent = q.title || '播放'; favBtn.disabled = !q.title; blkBtn.disabled = !q.title; }
+  if (q.platform) { await loadPlatformChannels(q.platform); } else { await loadChannelsWithAddress(); }
   const idx = findIndexByQuery(q);
   renderList();
-  if (idx >= 0) setCurrent(idx); else if (state.list.length > 0) setCurrent(0); else {
-    roomTitleEl.textContent = q.title || '播放';
-    const src0 = (() => {
-      if (q.id) return `/play/${encodeURIComponent(q.id)}`;
-      const src = q.url || q.address || '';
-      if (isHttp(src)) return `/proxy?url=${encodeURIComponent(src)}`;
-      if (isRtmp(src)) return `/proxy-rtmp?url=${encodeURIComponent(src)}`;
-      return '';
-    })();
-    if (src0) setup(src0);
-    favBtn.disabled = !q.title;
-    blkBtn.disabled = !q.title;
-  }
+  if (idx >= 0) setCurrent(idx); else if (!initialPlayed && state.list.length > 0) setCurrent(0);
 }
 
 prevBtn.onclick = () => {

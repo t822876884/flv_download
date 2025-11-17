@@ -22,11 +22,19 @@ function parseCookies(str) {
 
 // 保护除认证与登录页外的所有路由
 function authGuard(req, res, next) {
-  const allow = ['/auth/login', '/auth/logout', '/login', '/login.html'];
-  if (allow.includes(req.path)) return next();
+  const allow = new Set(['/auth/login', '/auth/logout', '/login', '/login.html', '/auth/me', '/download', '/download/parse']);
+  const pathname = (req.path || '').trim() || (req.url ? String(req.url).split('?')[0] : '');
+  const p = String(pathname || '').toLowerCase();
+  if (allow.has(p) || p.startsWith('/auth/') || p.startsWith('/download') ) return next();
+  if (req.method === 'OPTIONS') return next();
   const ck = parseCookies(req.headers.cookie || '');
   const sid = ck.sid || '';
-  const sess = sid ? sessions.get(sid) : null;
+  let sess = sid ? sessions.get(sid) : null;
+  if (!sess) {
+    const auth = String(req.headers.authorization || '');
+    const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    if (token) sess = sessions.get(token) || null;
+  }
   if (sess && sess.exp > Date.now()) return next();
   if (req.method === 'GET' || req.method === 'HEAD') {
     return res.redirect('/login');
@@ -66,7 +74,7 @@ function registerAuth(app) {
       const sid = crypto.randomBytes(24).toString('hex');
       sessions.set(sid, { exp: Date.now() + 2 * 60 * 60 * 1000 });
       res.setHeader('Set-Cookie', `sid=${encodeURIComponent(sid)}; Path=/; HttpOnly; SameSite=Lax`);
-      return res.json({ ok: true, require_change: needsReset ? 1 : 0 });
+      return res.json({ ok: true, token: sid, require_change: needsReset ? 1 : 0 });
     }
     return res.status(401).json({ ok: false, message: '用户名或密码错误' });
   });
@@ -87,7 +95,12 @@ function registerAuth(app) {
   app.post('/auth/change_password', (req, res) => {
     const ck = parseCookies(req.headers.cookie || '');
     const sid = ck.sid || '';
-    const sess = sid ? sessions.get(sid) : null;
+    let sess = sid ? sessions.get(sid) : null;
+    if (!sess) {
+      const auth = String(req.headers.authorization || '');
+      const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+      if (token) sess = sessions.get(token) || null;
+    }
     if (!sess || sess.exp <= Date.now()) return res.status(401).json({ ok: false, message: '未登录' });
     const oldPassword = String(req.body?.old_password || '');
     const newPassword = String(req.body?.new_password || '');
@@ -103,6 +116,21 @@ function registerAuth(app) {
     db.setSetting('admin_password', encoded);
     db.setSetting('admin_needs_reset', '0');
     return res.json({ ok: true });
+  });
+
+  app.get('/auth/me', (req, res) => {
+    const ck = parseCookies(req.headers.cookie || '');
+    const sid = ck.sid || '';
+    let sess = sid ? sessions.get(sid) : null;
+    if (!sess) {
+      const auth = String(req.headers.authorization || '');
+      const token = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+      if (token) sess = sessions.get(token) || null;
+    }
+    if (sess && sess.exp > Date.now()) {
+      return res.json({ ok: true });
+    }
+    return res.status(401).json({ ok: false, message: '未登录' });
   });
 }
 

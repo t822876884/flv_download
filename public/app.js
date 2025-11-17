@@ -349,6 +349,19 @@ function removeListItem(container, key) {
   if (target) target.remove();
 }
 
+function renderBatch(items, create, container, batchSize = 50) {
+  let i = 0;
+  function step() {
+    const frag = document.createDocumentFragment();
+    for (let n = 0; n < batchSize && i < items.length; n++, i++) {
+      frag.appendChild(create(items[i]));
+    }
+    container.appendChild(frag);
+    if (i < items.length) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
 async function loadExplore() {
   const listEl = document.getElementById('exploreList');
   const favP = document.getElementById('favPlatforms');
@@ -385,7 +398,7 @@ async function loadExplore() {
     card.dataset.address = p.address;
     card.innerHTML = `
       <div class="card-row">
-        <div class="thumb">${p.xinimg ? `<img src="${p.xinimg}" alt="">` : ''}</div>
+        <div class="thumb">${p.xinimg ? `<img src="${p.xinimg}" alt="" loading="lazy">` : ''}</div>
         <div>
           <div class="card-title">${p.title || p.address}</div>
           <div class="card-meta">数量：${p.number || 0}</div>
@@ -403,12 +416,8 @@ async function loadExplore() {
     return card;
   }
 
-  items.forEach((p) => {
-    platformTitleMap.set(p.address, p.title || p.address);
-    platformMap.set(p.address, p);
-    const card = createPlatformCard(p);
-    listEl.appendChild(card);
-  });
+  items.forEach((p) => { platformTitleMap.set(p.address, p.title || p.address); platformMap.set(p.address, p); });
+  renderBatch(items, createPlatformCard, listEl, 60);
 
   listEl.onclick = async (e) => {
     const btn = e.target.closest('button');
@@ -562,7 +571,7 @@ async function loadChannel(address, platformTitle) {
     card.dataset.title = c.title || '';
     card.innerHTML = `
       <div class="card-row">
-        <div class="thumb">${c.img ? `<img src="${c.img}" alt="">` : ''}</div>
+        <div class="thumb">${c.img ? `<img src="${c.img}" alt="" loading="lazy">` : ''}</div>
         <div>
           <div class="card-title">${c.title || c.address}</div>
           <div class="card-meta">来源：${platformName}</div>
@@ -580,12 +589,8 @@ async function loadChannel(address, platformTitle) {
     return card;
   }
 
-  items.forEach((c) => {
-    const key = c.platform_address + '|' + c.address;
-    channelMap.set(key, c);
-    const card = createChannelCard(c);
-    listEl.appendChild(card);
-  });
+  items.forEach((c) => { const key = c.platform_address + '|' + c.address; channelMap.set(key, c); });
+  renderBatch(items, createChannelCard, listEl, 60);
 
   listEl.onclick = async (e) => {
     const btn = e.target.closest('button');

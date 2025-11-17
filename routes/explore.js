@@ -1,6 +1,18 @@
 const axios = require('axios');
 const db = require('../db');
 const { ensureBaseUrl } = require('../lib/utils');
+const chanCache = require('../lib/cache');
+const cache = new Map();
+function getCached(key) {
+  const v = cache.get(key);
+  if (!v) return null;
+  if (v.exp && v.exp > Date.now()) return v.data;
+  cache.delete(key);
+  return null;
+}
+function setCached(key, data, ttlMs) {
+  cache.set(key, { data, exp: Date.now() + (ttlMs || 60000) });
+}
 
 function registerExplore(app) {
   app.get('/platforms', (req, res) => {
@@ -40,18 +52,18 @@ function registerExplore(app) {
     try {
       const base = ensureBaseUrl(db.getSetting('explore_base_url'));
       const url = base + 'json.txt';
-      const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
-      const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+      const cached = getCached(url);
+      const data = cached || (await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 })).data || {};
+      if (!cached) setCached(url, data, 60000);
       const list = Array.isArray(data.pingtai) ? data.pingtai : [];
-      list.forEach((p) => {
-        db.upsertPlatform({ address: String(p.address || ''), title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0) });
-      });
+      const favSet = new Set(db.listPlatformFavorites().map((p) => String(p.address || '')));
+      const blkSet = new Set(db.listPlatformBlocked().map((p) => String(p.address || '')));
       const items = list.map((p) => {
-        const row = db.getPlatform(String(p.address || '')) || {};
-        return { address: String(p.address || ''), title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0), favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
+        const address = String(p.address || '');
+        return { address, title: p.title || null, xinimg: p.xinimg || null, number: Number(p.Number || 0), favorite: favSet.has(address) ? 1 : 0, blocked: blkSet.has(address) ? 1 : 0 };
       }).filter((x) => x.address && !x.blocked);
-      const favorites = db.listPlatformFavorites();
-      const blocks = db.listPlatformBlocked();
+      const favorites = Array.from(favSet).map((address) => ({ address }));
+      const blocks = Array.from(blkSet).map((address) => ({ address }));
       res.json({ ok: true, items, favorites, blocks });
     } catch (err) {
       if (req.log) req.log.error('explore-platforms-error', { err: err?.stack || String(err) });
@@ -65,17 +77,23 @@ function registerExplore(app) {
       if (!platformAddress) return res.status(400).json({ ok: false, message: '缺少 address' });
       const base = ensureBaseUrl(db.getSetting('explore_base_url'));
       const url = base + platformAddress;
-      const r = await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 });
-      const data = r && r.data && typeof r.data === 'object' ? r.data : {};
+      const cached = getCached(url);
+      const data = cached || (await axios.get(url, { timeout: 1000 * 20, validateStatus: (s) => s >= 200 && s < 400 })).data || {};
+      if (!cached) setCached(url, data, 60000);
       const list = Array.isArray(data.zhubo) ? data.zhubo : [];
+      const favSet = chanCache.getFavSet();
+      const blkSet = chanCache.getBlkSet();
       const items = list.map((c) => {
-        const row = c.title ? db.getChannelByTitle(String(c.title)) || {} : {};
-        return { platform_address: platformAddress, address: String(c.address || ''), title: c.title || null, img: c.img || null, favorite: row.favorite ? 1 : 0, blocked: row.blocked ? 1 : 0 };
+        const title = c.title || null;
+        const address = String(c.address || '');
+        const favorite = title && favSet.has(String(title)) ? 1 : 0;
+        const blocked = title && blkSet.has(String(title)) ? 1 : 0;
+        return { platform_address: platformAddress, address, title, img: c.img || null, favorite, blocked };
       }).filter((x) => x.address && !x.blocked);
       const pRow = db.getPlatform(platformAddress) || {};
       const platform_title = pRow && pRow.title ? pRow.title : null;
-      const favorites = db.listChannelFavorites();
-      const blocks = db.listChannelBlocked();
+      const favorites = Array.from(chanCache.getFavSet()).map((title) => ({ title }));
+      const blocks = Array.from(chanCache.getBlkSet()).map((title) => ({ title }));
       res.json({ ok: true, platform_address: platformAddress, platform_title, items, favorites, blocks });
     } catch (err) {
       if (req.log) req.log.error('explore-channel-error', { err: err?.stack || String(err) });

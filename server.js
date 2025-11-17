@@ -10,6 +10,7 @@ const path = require('path');
 const crypto = require('crypto');
 const db = require('./db');
 const logger = require('./lib/logger');
+const cache = require('./lib/cache');
 const {
   sanitizeName,
   normalizeUrl,
@@ -77,17 +78,32 @@ const app = express();
 app.use(express.json({ limit: '1mb' }));
 app.use(logger.requestLogger());
 
+app.use((req, res, next) => {
+  const origin = process.env.CORS_ORIGINS || '*';
+  res.setHeader('Access-Control-Allow-Origin', origin);
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,DELETE,OPTIONS');
+  if (req.method === 'OPTIONS') return res.sendStatus(204);
+  next();
+});
+
 const { registerAuth, authGuard } = require('./routes/auth');
 registerAuth(app);
 const { registerExplore } = require('./routes/explore');
 registerExplore(app);
 
-app.use(authGuard);
+app.use((req, res, next) => {
+  const p = (req.path || (req.url ? String(req.url).split('?')[0] : '')) || '';
+  if (req.method === 'POST' && (p === '/download' || p.startsWith('/download'))) return next();
+  return authGuard(req, res, next);
+});
 app.use(express.static(path.join(process.cwd(), 'public')));
 
 // 基础存储目录（可通过环境变量覆盖）
 const BASE_DIR = process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : process.cwd();
 fs.mkdirSync(BASE_DIR, { recursive: true });
+
+try { cache.init(db); } catch (_) {}
 
 const activeDownloads = new Map();
 
@@ -382,6 +398,7 @@ app.post('/channel/favorite', (req, res) => {
   if (!row) db.upsertChannelByTitle({ title, address });
   if (address) db.updateChannelAddressByTitle(title, address);
   db.toggleChannelFavoriteByTitle(title, flag);
+  try { cache.setFavorite(title, !!flag); } catch (_) {}
   const ret = db.getChannelByTitle(title);
   res.json({ ok: true, title, address: ret?.address || null, favorite: ret?.favorite ? 1 : 0 });
 });
@@ -394,6 +411,7 @@ app.post('/channel/blocked', (req, res) => {
   if (!row) db.upsertChannelByTitle({ title, address: null });
   db.toggleChannelBlockedByTitle(title, flag);
   if (flag) db.toggleChannelFavoriteByTitle(title, false);
+  try { cache.setBlocked(title, !!flag); } catch (_) {}
   const ret = db.getChannelByTitle(title);
   res.json({ ok: true, title, blocked: ret?.blocked ? 1 : 0 });
 });
