@@ -22,7 +22,7 @@ function parseCookies(str) {
 
 // 保护除认证与登录页外的所有路由
 function authGuard(req, res, next) {
-  const allow = new Set(['/auth/login', '/auth/logout', '/login', '/login.html', '/auth/me', '/download', '/download/parse']);
+  const allow = new Set(['/auth/login', '/auth/logout', '/login', '/login.html', '/auth/me', '/download', '/download/parse', '/tasks']);
   const pathname = (req.path || '').trim() || (req.url ? String(req.url).split('?')[0] : '');
   const p = String(pathname || '').toLowerCase();
   if (allow.has(p) || p.startsWith('/auth/') || p.startsWith('/download') ) return next();
