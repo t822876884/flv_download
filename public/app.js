@@ -52,6 +52,7 @@ function showView(name) {
   } else if (name === 'home') {
     loadHomeFavorites();
     startHomeFavoritesPoll();
+    setupSchedulerToggle();
   }
 }
 
@@ -280,6 +281,53 @@ async function loadSettings() {
     const minutes = parseInt(String(d2?.value || '1'), 10);
     document.getElementById('intervalInput').value = minutes;
   } catch (_) {}
+}
+
+async function setupSchedulerToggle() {
+  const btn = document.getElementById('schedulerToggleBtn');
+  if (!btn) return;
+  btn.disabled = true;
+  try {
+    const r = await fetch('/scheduler/enabled');
+    const d = await r.json();
+    const on = !!(d && d.value);
+    btn.textContent = '定时任务：' + (on ? '已开启' : '已关闭');
+    btn.dataset.on = on ? '1' : '0';
+  } catch (_) {}
+  btn.disabled = false;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try {
+      const next = btn.dataset.on === '1' ? 0 : 1;
+      const r = await fetch('/scheduler/enabled', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value: next })
+      });
+      const d = await r.json();
+      const on = !!(d && d.value);
+      btn.textContent = '定时任务：' + (on ? '已开启' : '已关闭');
+      btn.dataset.on = on ? '1' : '0';
+    } catch (_) {}
+    btn.disabled = false;
+  };
+
+  const manualBtn = document.getElementById('manualUpdateBtn');
+  if (manualBtn) {
+    manualBtn.onclick = async () => {
+      manualBtn.disabled = true;
+      try {
+        const r = await fetch('/scheduler/manual_update', { method: 'POST' });
+        const d = await r.json();
+        if (d && d.ok) {
+          const n = typeof d.created === 'number' ? d.created : 0;
+          alert('已刷新并提交下载 ' + n + ' 条');
+          try { await loadHomeFavorites(); } catch (_) {}
+        } else {
+          alert('刷新失败');
+        }
+      } catch (_) { alert('刷新失败'); }
+      manualBtn.disabled = false;
+    };
+  }
 }
 
 document.getElementById('saveBaseUrl').addEventListener('click', async () => {

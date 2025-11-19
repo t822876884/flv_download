@@ -81,6 +81,10 @@ function setCurrent(i) {
   const src = computeSrc(item);
   if (src) setup(src);
   updateOps(item);
+  try {
+    const active = listEl.querySelector('.item.active');
+    if (active) active.scrollIntoView({ block: 'nearest' });
+  } catch (_) {}
 }
 
 function updateOps(item) {
@@ -100,7 +104,7 @@ async function loadPlatformChannels(platformAddress) {
 
 async function loadChannelsWithAddress() {
   try {
-    const r = await fetch('/channels/with_address');
+    const r = await fetch('/channels/favorites');
     const d = await r.json();
     const items = (Array.isArray(d.items) ? d.items : []).filter((c) => c && c.address);
     state.list = items;

@@ -102,6 +102,14 @@ const getTaskByIdStmt = db.prepare(`
   SELECT * FROM tasks WHERE id = ?
 `);
 
+const hasDownloadingByTitleStmt = db.prepare(`
+  SELECT 1 FROM tasks WHERE title = ? AND status = 'downloading' LIMIT 1
+`);
+
+const getDownloadingByTitleStmt = db.prepare(`
+  SELECT id FROM tasks WHERE title = ? AND status = 'downloading' ORDER BY updated_at DESC LIMIT 1
+`);
+
 const countByStatusStmt = db.prepare(`
   SELECT COUNT(*) AS total FROM tasks WHERE status = ?
 `);
@@ -219,6 +227,14 @@ module.exports = {
   },
   getById(id) {
     return getTaskByIdStmt.get(id);
+  },
+  hasDownloadingByTitle(title) {
+    const r = hasDownloadingByTitleStmt.get(title);
+    return !!r;
+  },
+  getDownloadingByTitle(title) {
+    const r = getDownloadingByTitleStmt.get(title);
+    return r ? r.id : null;
   },
   listByStatus(status, page = 1, pageSize = 10) {
     const p = Number.isFinite(Number(page)) ? Math.floor(Number(page)) : 1;

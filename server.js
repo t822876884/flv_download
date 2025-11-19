@@ -21,7 +21,7 @@ const {
   ensureBaseUrl,
   ensureIntervalMinutes,
 } = require('./lib/utils');
-const { startChannelUpdateScheduler } = require('./lib/scheduler');
+const { startChannelUpdateScheduler, stopChannelUpdateScheduler, updateFavoriteChannelAddresses } = require('./lib/scheduler');
 
 const sysLog = logger.child({ scope: 'system' });
 process.on('uncaughtException', (err) => {
@@ -191,6 +191,41 @@ function startDownload(title, url) {
   return { id, folderPath, filename, filePath };
 }
 
+function runAutoDownloadOnce() {
+  let created = 0;
+  try {
+    const items = db.listChannelsWithAddress();
+    items.forEach((c) => {
+      const title = sanitizeName(c.title || '');
+      const url = normalizeUrl(c.address || '');
+      if (!title || !url || !isHttpUrl(url)) return;
+      if (activeDownloads.has(title) || db.hasDownloadingByTitle(title)) return;
+      try { startDownload(title, url); created += 1; } catch (_) {}
+    });
+  } catch (_) {}
+  return created;
+}
+
+let schedulerEnabled = false;
+function startAutoScheduler() {
+  const minutes = ensureIntervalMinutes(db.getSetting('poll_interval_minutes'));
+  stopAutoScheduler();
+  schedulerEnabled = true;
+  startChannelUpdateScheduler();
+  const intervalMs = Math.max(1, minutes) * 60 * 1000;
+  global.__autoDlTimer && clearInterval(global.__autoDlTimer);
+  global.__autoDlTimer = setInterval(async () => {
+    try { await updateFavoriteChannelAddresses(); } catch (_) {}
+    runAutoDownloadOnce();
+  }, intervalMs);
+  (async () => { try { await updateFavoriteChannelAddresses(); } catch (_) {} runAutoDownloadOnce(); })();
+}
+function stopAutoScheduler() {
+  schedulerEnabled = false;
+  try { stopChannelUpdateScheduler(); } catch (_) {}
+  if (global.__autoDlTimer) { clearInterval(global.__autoDlTimer); global.__autoDlTimer = null; }
+}
+
 // 修改下载接口：写入 SQLite，记录唯一 id 与状态
 app.post('/download', async (req, res) => {
   try {
@@ -205,7 +240,7 @@ app.post('/download', async (req, res) => {
     return res.status(503).json({ ok: false, message: '服务升级中，暂停新下载' });
   }
 
-    if (activeDownloads.has(title)) {
+    if (activeDownloads.has(title) || db.hasDownloadingByTitle(title)) {
       return res.status(200).json({
         ok: true,
         message: '同名下载任务正在进行，已跳过',
@@ -272,7 +307,7 @@ app.post('/download/parse', express.text({ type: ['text/plain', 'text/*', 'appli
     return res.status(503).json({ ok: false, message: '服务升级中，暂停新下载' });
   }
 
-    if (activeDownloads.has(title)) {
+    if (activeDownloads.has(title) || db.hasDownloadingByTitle(title)) {
       return res.status(200).json({
         ok: true,
         message: '同名下载任务正在进行，已跳过',
@@ -317,7 +352,7 @@ app.post('/config/poll_interval_minutes', (req, res) => {
   const n = ensureIntervalMinutes(raw);
   db.setSetting('poll_interval_minutes', String(n));
   res.json({ ok: true, value: n });
-  startChannelUpdateScheduler();
+  if (schedulerEnabled) startAutoScheduler();
 });
 
 app.get('/explore/platforms', async (req, res) => {
@@ -607,17 +642,21 @@ app.post('/cancel', (req, res) => {
   if (!title) return res.status(400).json({ ok: false, message: '缺少 id 或 title' });
 
   const task = activeDownloads.get(title);
-  if (!task) return res.status(404).json({ ok: false, message: '未找到进行中的同名任务' });
 
   try {
-    task.controller.abort();
-    try { task.writer.destroy(); } catch (_) {}
-    try { if (fs.existsSync(task.filePath)) fs.unlinkSync(task.filePath); } catch (_) {}
-
-    activeDownloads.delete(title);
-    db.setStatus(task.id, 'cancelled');
-
-    return res.json({ ok: true, message: '已取消下载并删除临时文件', taskId: task.id });
+    if (task) {
+      task.controller.abort();
+      try { task.writer.destroy(); } catch (_) {}
+      activeDownloads.delete(title);
+      db.setStatus(task.id, 'cancelled');
+      return res.json({ ok: true, message: '已取消下载', taskId: task.id });
+    }
+    const fallbackId = id || db.getDownloadingByTitle(title);
+    if (!fallbackId) {
+      return res.status(404).json({ ok: false, message: '未找到进行中的同名任务（可能已完成或服务重启）' });
+    }
+    db.setStatus(fallbackId, 'cancelled');
+    return res.json({ ok: true, message: '已取消下载', taskId: fallbackId });
   } catch (err) {
     return res.status(500).json({ ok: false, message: '取消失败', error: err?.message || String(err) });
   }
@@ -681,4 +720,30 @@ const server = app.listen(PORT, () => {
   sysLog.info('listening', { url: `http://localhost:${PORT}` });
   try { if (typeof process.send === 'function') process.send('ready'); } catch (_) {}
 });
-startChannelUpdateScheduler();
+try {
+  const v = db.getSetting('scheduler_enabled');
+  if (v === '1' || v === 'true') startAutoScheduler();
+} catch (_) {}
+app.get('/scheduler/enabled', (req, res) => {
+  const v = db.getSetting('scheduler_enabled');
+  const flag = v === '1' || v === 'true';
+  res.json({ ok: true, value: flag });
+});
+app.post('/scheduler/enabled', (req, res) => {
+  const flag = req.body && (req.body.value === 1 || req.body.value === '1' || req.body.value === true);
+  db.setSetting('scheduler_enabled', flag ? '1' : '0');
+  if (flag) { startAutoScheduler(); } else { stopAutoScheduler(); }
+  res.json({ ok: true, value: flag });
+});
+
+app.post('/scheduler/manual_update', async (req, res) => {
+  try {
+    await updateFavoriteChannelAddresses();
+    const rows = db.listChannelsWithAddress();
+    const updated = Array.isArray(rows) ? rows.length : 0;
+    const created = runAutoDownloadOnce();
+    res.json({ ok: true, updated, created });
+  } catch (err) {
+    res.status(500).json({ ok: false, message: err?.message || String(err) });
+  }
+});
