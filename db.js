@@ -114,6 +114,17 @@ const listByStatusStmt = db.prepare(`
   LIMIT ? OFFSET ?
 `);
 
+// 统一列表：按时间倒序列出所有任务
+const countAllStmt = db.prepare(`
+  SELECT COUNT(*) AS total FROM tasks
+`);
+const listAllStmt = db.prepare(`
+  SELECT id, title, url, save_dir, file_path, status, created_at, updated_at
+  FROM tasks
+  ORDER BY created_at DESC
+  LIMIT ? OFFSET ?
+`);
+
 const getSettingStmt = db.prepare(`
   SELECT value FROM settings WHERE key = ?
 `);
@@ -210,10 +221,24 @@ module.exports = {
     return getTaskByIdStmt.get(id);
   },
   listByStatus(status, page = 1, pageSize = 10) {
+    const p = Number.isFinite(Number(page)) ? Math.floor(Number(page)) : 1;
+    const ps = Number.isFinite(Number(pageSize)) ? Math.floor(Number(pageSize)) : 10;
+    const safePage = Math.max(1, p);
+    const safePageSize = Math.max(1, ps);
     const total = countByStatusStmt.get(status).total;
-    const offset = (Math.max(1, page) - 1) * Math.max(1, pageSize);
-    const items = listByStatusStmt.all(status, Math.max(1, pageSize), offset);
-    return { items, total, page, pageSize };
+    const offset = (safePage - 1) * safePageSize;
+    const items = listByStatusStmt.all(status, safePageSize, offset);
+    return { items, total, page: safePage, pageSize: safePageSize };
+  },
+  listAll(page = 1, pageSize = 10) {
+    const p = Number.isFinite(Number(page)) ? Math.floor(Number(page)) : 1;
+    const ps = Number.isFinite(Number(pageSize)) ? Math.floor(Number(pageSize)) : 10;
+    const safePage = Math.max(1, p);
+    const safePageSize = Math.max(1, ps);
+    const total = countAllStmt.get().total;
+    const offset = (safePage - 1) * safePageSize;
+    const items = listAllStmt.all(safePageSize, offset);
+    return { items, total, page: safePage, pageSize: safePageSize };
   },
   getSetting(key) {
     const r = getSettingStmt.get(key);

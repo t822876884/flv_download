@@ -437,8 +437,8 @@ app.get('/play/:id', (req, res) => {
   const task = db.getById(id);
   if (!task) return res.status(404).send('任务不存在');
 
-  if (task.status !== 'completed' || !task.file_path || !fs.existsSync(task.file_path)) {
-    return res.status(400).send('任务未完成或文件不存在');
+  if (!task.file_path || !fs.existsSync(task.file_path)) {
+    return res.status(400).send('文件不存在');
   }
 
   const stat = fs.statSync(task.file_path);
@@ -630,16 +630,17 @@ app.post('/delete', (req, res) => {
 
   const task = db.getById(id);
   if (!task) return res.status(404).json({ ok: false, message: '任务不存在' });
-  if (task.status !== 'completed') {
-    return res.status(400).json({ ok: false, message: '仅可删除 status=completed 的任务' });
+  const allowed = ['completed', 'cancelled', 'error'];
+  if (!allowed.includes(task.status)) {
+    return res.status(400).json({ ok: false, message: '仅可删除 completed/cancelled/error 状态任务' });
   }
 
   try {
     if (task.file_path && fs.existsSync(task.file_path)) {
-      fs.unlinkSync(task.file_path);
+      try { fs.unlinkSync(task.file_path); } catch (_) {}
     }
-    db.setStatus(id, 'deleted');
-    res.json({ ok: true, message: '已删除文件', id });
+    db.deleteRow(id);
+    res.json({ ok: true, message: '已删除任务与文件', id });
   } catch (err) {
     res.status(500).json({ ok: false, message: '删除失败', error: err?.message || String(err) });
   }
@@ -652,9 +653,14 @@ app.get('/tasks', (req, res) => {
     const page = parseInt(req.query.page || '1', 10);
     const pageSize = parseInt(req.query.pageSize || '10', 10);
 
-    const allowed = ['downloading', 'completed'];
+    if (!status) {
+      const result = db.listAll(page, pageSize);
+      return res.json({ ok: true, ...result });
+    }
+
+    const allowed = ['downloading', 'completed', 'cancelled', 'error'];
     if (!allowed.includes(status)) {
-      return res.status(400).json({ ok: false, message: 'status must be downloading or completed' });
+      return res.status(400).json({ ok: false, message: 'status must be one of downloading|completed|cancelled|error or empty' });
     }
 
     const result = db.listByStatus(status, page, pageSize);

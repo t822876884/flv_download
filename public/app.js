@@ -40,9 +40,8 @@ function showView(name) {
   const el = document.getElementById(id);
   if (el) el.style.display = '';
   if (name === 'downloads') {
-    refresh('downloading');
-    refresh('completed');
-    startDownloadingPoll();
+    refreshAll();
+    startTasksPoll();
     if (homeFavoritesTimer) { clearInterval(homeFavoritesTimer); homeFavoritesTimer = null; }
   } else if (name === 'settings') {
     loadSettings();
@@ -78,11 +77,8 @@ function router() {
 }
 
 window.addEventListener('hashchange', router);
-const state = {
-  downloading: { page: 1, pageSize: 10, total: 0 },
-  completed: { page: 1, pageSize: 10, total: 0 },
-};
-let downloadingPollTimer = null;
+const state = { tasks: { page: 1, pageSize: 10, total: 0 } };
+let tasksPollTimer = null;
 let POLL_MS = 10000;
 let homeFavoritesTimer = null;
 
@@ -96,33 +92,40 @@ function fmtTime(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-async function fetchTasks(status) {
-  const { page, pageSize } = state[status];
-  const res = await fetch(`/tasks?status=${status}&page=${page}&pageSize=${pageSize}`);
+const STATUS_MAP = { downloading: '下载中', completed: '已完成', cancelled: '已取消', error: '失败' };
+
+async function fetchAllTasks() {
+  const { page, pageSize } = state.tasks;
+  const res = await fetch(`/tasks?page=${page}&pageSize=${pageSize}`);
   const data = await res.json();
   if (!data.ok) return { items: [], total: 0 };
-  state[status].total = data.total;
+  state.tasks.total = data.total;
   return data;
 }
 
-function renderList(status, items) {
-  const listEl = document.getElementById(status === 'downloading' ? 'downloadingList' : 'completedList');
+function renderAllList(items) {
+  const listEl = document.getElementById('taskList');
   listEl.innerHTML = '';
   items.forEach((t) => {
-    const li = document.createElement('li');
-    li.className = 'row';
-    li.innerHTML = `
-      <div class="title">${t.title}</div>
-      <div class="meta">${fmtTime(t.created_at)}</div>
-      <div class="ops">
-        ${status === 'downloading'
-          ? `<button data-op="play" data-url="${encodeURIComponent(t.url)}">播放</button>
-             <button data-op="cancel" data-id="${t.id}" data-title="${t.title}">取消</button>`
-          : `<button data-op="play-completed" data-id="${t.id}">播放</button>
-             <button data-op="delete" data-id="${t.id}">删除</button>`}
-      </div>
+    const tr = document.createElement('tr');
+    tr.className = 'is-' + (t.status || '');
+    const url = String(t.url || '').trim().replace(/^`|`$/g, '');
+    const urlText = url.length > 60 ? (url.slice(0, 57) + '...') : url;
+    const statusText = STATUS_MAP[t.status] || (t.status || '');
+    const ops = (t.status === 'downloading')
+      ? `<button data-op="play" data-url="${encodeURIComponent(url)}">播放</button>
+         <button data-op="cancel" data-id="${t.id}" data-title="${t.title}">取消</button>`
+      : `<button data-op="play-completed" data-id="${t.id}" ${t.file_path ? '' : 'disabled'}>播放</button>
+         <button data-op="delete" data-id="${t.id}">删除</button>`;
+    tr.innerHTML = `
+      <td class="title">${t.id}</td>
+      <td>${t.title}</td>
+      <td title="${url}">${urlText}</td>
+      <td class="meta">${fmtTime(t.created_at)}</td>
+      <td><span class="badge ${t.status}">${statusText}</span></td>
+      <td class="ops">${ops}</td>
     `;
-    listEl.appendChild(li);
+    listEl.appendChild(tr);
   });
 
   // 稳定事件委托（避免 { once: true } 导致后续点击失效）
@@ -143,7 +146,7 @@ function renderList(status, items) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(id ? { id } : { title }),
         });
-        await refresh('downloading'); // 取消后立即刷新下载中列表
+        await refreshAll();
       } finally {
         btn.disabled = false;
       }
@@ -159,7 +162,7 @@ function renderList(status, items) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ id }),
         });
-        await refresh('completed');
+        await refreshAll();
       } finally {
         btn.disabled = false;
       }
@@ -167,14 +170,14 @@ function renderList(status, items) {
   };
 }
 
-function renderPager(status) {
-  const s = state[status];
+function renderAllPager() {
+  const s = state.tasks;
   const maxPage = Math.max(1, Math.ceil(s.total / s.pageSize));
   s.page = Math.min(s.page, maxPage);
 
-  const infoEl = document.getElementById(status === 'downloading' ? 'downInfo' : 'compInfo');
-  const prevEl = document.getElementById(status === 'downloading' ? 'downPrev' : 'compPrev');
-  const nextEl = document.getElementById(status === 'downloading' ? 'downNext' : 'compNext');
+  const infoEl = document.getElementById('taskInfo');
+  const prevEl = document.getElementById('taskPrev');
+  const nextEl = document.getElementById('taskNext');
 
   infoEl.textContent = `第 ${s.page} / ${maxPage} 页，共 ${s.total} 条`;
   prevEl.disabled = s.page <= 1;
@@ -183,36 +186,36 @@ function renderPager(status) {
   prevEl.onclick = async () => {
     if (s.page > 1) {
       s.page -= 1;
-      await refresh(status);
+      await refreshAll();
     }
   };
   nextEl.onclick = async () => {
     if (s.page < maxPage) {
       s.page += 1;
-      await refresh(status);
+      await refreshAll();
     }
   };
 }
 
-async function refresh(status) {
-  const { items } = await fetchTasks(status);
-  renderList(status, items);
-  renderPager(status);
+async function refreshAll() {
+  const { items } = await fetchAllTasks();
+  renderAllList(items);
+  renderAllPager();
 }
 
-// 启动/暂停“下载中”列表的自动轮询（标签页不可见时暂停）
-function startDownloadingPoll() {
-  if (downloadingPollTimer) clearInterval(downloadingPollTimer);
-  const tick = () => refresh('downloading');
+// 启动/暂停任务列表的自动轮询（标签页不可见时暂停）
+function startTasksPoll() {
+  if (tasksPollTimer) clearInterval(tasksPollTimer);
+  const tick = () => refreshAll();
 
   // 仅在页面可见时轮询
   const setup = () => {
     if (document.visibilityState === 'visible') {
-      tick(); // 切回可见时先立即刷新一次
-      downloadingPollTimer = setInterval(tick, POLL_MS);
+      tick();
+      tasksPollTimer = setInterval(tick, POLL_MS);
     } else {
-      if (downloadingPollTimer) clearInterval(downloadingPollTimer);
-      downloadingPollTimer = null;
+      if (tasksPollTimer) clearInterval(tasksPollTimer);
+      tasksPollTimer = null;
     }
   };
 
@@ -240,7 +243,7 @@ document.getElementById('downloadForm').addEventListener('submit', async (e) => 
   }
 
   document.getElementById('url').value = '';
-  await refresh('downloading');
+  await refreshAll();
 });
 
 // 新增：解析文本下载，不影响原表单
@@ -262,7 +265,7 @@ document.getElementById('parseForm').addEventListener('submit', async (e) => {
   }
 
   document.getElementById('parseText').value = '';
-  await refresh('downloading');
+  await refreshAll();
 });
 
 async function loadSettings() {

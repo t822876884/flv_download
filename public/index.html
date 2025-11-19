@@ -77,35 +77,36 @@
         <section id="downloadView" style="display:none">
           <div class="top">
             <form id="downloadForm">
-              <input type="text" id="title" placeholder="主播名（如：小花猫）" required />
+              <input type="text" id="title" placeholder="主播名（如：KK）" required />
               <input type="url" id="url" placeholder="视频地址（http://...flv）" required />
               <button type="submit">提交下载</button>
             </form>
             <form id="parseForm">
-              <textarea id="parseText" rows="1" placeholder="粘贴文本（如：柒萌KK ffmpeg -i `http://...flv` -q 0 -f flv ./柒萌KK20250101123000.flv）" required></textarea>
+              <textarea id="parseText" rows="1" placeholder="粘贴文本（如：KK ffmpeg -i `http://...flv` -q 0 -f flv ./KK20250101123000.flv）" required></textarea>
               <button type="submit">解析并下载</button>
             </form>
           </div>
-          <div class="lists">
-            <section class="panel">
-              <h2>下载中</h2>
-              <ul id="downloadingList"></ul>
-              <div class="pager">
-                <button id="downPrev">上一页</button>
-                <span id="downInfo"></span>
-                <button id="downNext">下一页</button>
-              </div>
-            </section>
-            <section class="panel">
-              <h2>已完成</h2>
-              <ul id="completedList"></ul>
-              <div class="pager">
-                <button id="compPrev">上一页</button>
-                <span id="compInfo"></span>
-                <button id="compNext">下一页</button>
-              </div>
-            </section>
-          </div>
+          <section class="panel">
+            <h2>下载任务</h2>
+            <table class="task-table">
+              <thead>
+                <tr>
+                  <th>任务名</th>
+                  <th>直播间</th>
+                  <th>视频URL</th>
+                  <th>任务创建时间</th>
+                  <th>状态</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="taskList"></tbody>
+            </table>
+            <div class="pager">
+              <button id="taskPrev">上一页</button>
+              <span id="taskInfo"></span>
+              <button id="taskNext">下一页</button>
+            </div>
+          </section>
         </section>
 
         <section id="settingsView" style="display:none">

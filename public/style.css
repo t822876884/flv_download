@@ -225,6 +225,17 @@ ul { list-style: none; padding: 0; margin: 0; }
 .title { font-weight: 600; color: var(--text); }
 .meta { font-size: 12px; color: var(--text-muted); }
 
+/* 状态徽章与行色 */
+.badge { display:inline-block; padding:3px 8px; border-radius: 999px; font-size:12px; font-weight:600; border:1px solid var(--border); }
+.badge.downloading { color:#fff; background: var(--accent); border-color: transparent; }
+.badge.completed { color:#fff; background: var(--success); border-color: transparent; }
+.badge.error { color:#fff; background: var(--danger); border-color: transparent; }
+.badge.cancelled { color:#fff; background:#999; border-color: transparent; }
+.row.is-downloading { border-color: var(--accent); }
+.row.is-completed { border-color: var(--success); }
+.row.is-error { border-color: var(--danger); }
+.row.is-cancelled { border-color: #b8bfce; }
+
 /* 操作按钮组 */
 .ops { display: inline-flex; gap: 8px; }
 .ops button {
@@ -300,6 +311,13 @@ ul { list-style: none; padding: 0; margin: 0; }
   .explore-wrapper { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 120px 1fr auto; }
 }
+
+.task-table { width: 100%; border-collapse: collapse; }
+.task-table thead th { text-align: left; font-size: 12px; color: var(--text-muted); font-weight: 700; padding: 6px 8px; }
+.task-table tbody td { padding: 10px 8px; border-top: 1px solid var(--border); }
+.task-table tbody td.title { font-weight: 600; }
+.task-table tbody td.meta { font-size: 12px; color: var(--text-muted); }
+.task-table tbody td .ops button { padding: 6px 10px; border-radius: 9px; }
 /* 可选暗色偏好（系统深色时） */
 @media (prefers-color-scheme: dark) {
   :root {
